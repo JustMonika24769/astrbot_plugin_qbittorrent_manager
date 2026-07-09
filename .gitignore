@@ -183,3 +183,4 @@ cython_debug/
 astrbot_plugin_qbittorrent_manager.zip
 temp.txt
 .agents/
+package.ps1
