@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width={{ render_width }}, height={{ render_height }}">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    html {
+      width: {{ render_width }}px;
+      height: {{ render_height }}px;
+      margin: 0;
+      overflow: hidden;
+      background: #eff6ff;
+    }
+    body {
+      width: {{ render_width }}px;
+      height: {{ render_height }}px;
+      margin: 0;
+      padding: 20px;
+      overflow: hidden;
+      color: #1f2937;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 60%, #eef2ff 100%);
+    }
+    .card {
+      height: 100%;
+      overflow: hidden;
+      border: 1px solid rgba(99, 102, 241, 0.18);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 16px 36px rgba(30, 41, 59, 0.12);
+    }
+    header {
+      height: 94px;
+      padding: 20px 28px 16px;
+      color: white;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+    }
+    header .label {
+      opacity: 0.82;
+      font-size: 15px;
+      letter-spacing: 2px;
+    }
+    h1 {
+      margin: 6px 0 0;
+      overflow: hidden;
+      font-size: 27px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .list {
+      padding: 16px 18px 0;
+    }
+    .item {
+      display: flex;
+      height: 98px;
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      background: #ffffff;
+    }
+    .item + .item {
+      margin-top: 10px;
+    }
+    .rank {
+      display: flex;
+      flex: 0 0 42px;
+      width: 42px;
+      height: 42px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      color: #2563eb;
+      font-size: 20px;
+      font-weight: 800;
+      background: #dbeafe;
+    }
+    .content {
+      min-width: 0;
+      flex: 1;
+    }
+    h2 {
+      margin: 0;
+      overflow: hidden;
+      color: #0f172a;
+      font-size: 18px;
+      line-height: 1.28;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    p {
+      margin: 6px 0 9px;
+      overflow: hidden;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .meta span {
+      padding: 5px 9px;
+      border-radius: 999px;
+      color: #334155;
+      font-size: 12px;
+      background: #f1f5f9;
+    }
+    footer {
+      height: 60px;
+      padding: 16px 28px 0;
+      color: #475569;
+      font-size: 15px;
+    }
+    code {
+      padding: 4px 8px;
+      border-radius: 8px;
+      color: #1d4ed8;
+      background: #dbeafe;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <header>
+      <div class="label">TORRENT SEARCH</div>
+      <h1>「{{ keyword }}」搜索结果</h1>
+    </header>
+    <section class="list">
+      {{ results }}
+    </section>
+    <footer>发送 <code>/种子下载 序号</code> 添加到 qBittorrent，例如 <code>/种子下载 1</code></footer>
+  </div>
+</body>
+</html>

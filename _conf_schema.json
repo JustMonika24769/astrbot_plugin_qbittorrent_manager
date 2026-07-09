@@ -1,0 +1,79 @@
+{
+  "provider_base_url": {
+    "description": "PT 站点地址，默认北洋园 PT。",
+    "type": "string",
+    "hint": "https://www.tjupt.org/",
+    "default": "https://www.tjupt.org/"
+  },
+  "provider_search_path": {
+    "description": "搜索路径，必须包含 {keyword} 占位符。",
+    "type": "string",
+    "hint": "torrents.php?search={keyword}&incldead=0",
+    "default": "torrents.php?search={keyword}&incldead=0"
+  },
+  "provider_cookie": {
+    "description": "PT 站登录 Cookie，用于搜索和下载 .torrent 文件。",
+    "type": "string",
+    "hint": "从浏览器开发者工具复制 Cookie 请求头",
+    "default": ""
+  },
+  "qb_url": {
+    "description": "qBittorrent WebUI 地址。",
+    "type": "string",
+    "hint": "http://127.0.0.1:8080",
+    "default": ""
+  },
+  "qb_username": {
+    "description": "qBittorrent WebUI 用户名。",
+    "type": "string",
+    "hint": "可留空",
+    "default": ""
+  },
+  "qb_password": {
+    "description": "qBittorrent WebUI 密码。",
+    "type": "string",
+    "hint": "可留空",
+    "default": ""
+  },
+  "qb_save_path": {
+    "description": "可选：qBittorrent 保存路径。",
+    "type": "string",
+    "hint": "例如 /downloads/PT",
+    "default": ""
+  },
+  "qb_category": {
+    "description": "可选：qBittorrent 分类。",
+    "type": "string",
+    "hint": "例如 PT",
+    "default": ""
+  },
+  "qb_paused": {
+    "description": "添加任务后是否暂停。",
+    "type": "bool",
+    "default": false
+  },
+  "max_results": {
+    "description": "每次搜索最多返回结果数。",
+    "type": "int",
+    "hint": "1-30",
+    "default": 10
+  },
+  "cache_ttl_seconds": {
+    "description": "搜索结果选择缓存时间，默认 600 秒（10 分钟），超时后需重新搜索。",
+    "type": "int",
+    "hint": "60-3600",
+    "default": 600
+  },
+  "render_width": {
+    "description": "结果卡片渲染宽度，插件会按结果数量自动计算高度。",
+    "type": "int",
+    "hint": "640-1400",
+    "default": 900
+  },
+  "request_timeout": {
+    "description": "网络请求超时时间，单位秒。",
+    "type": "float",
+    "hint": "5-120",
+    "default": 20
+  }
+}
