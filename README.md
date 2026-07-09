@@ -1,7 +1,5 @@
 <div align="center">
 
-![:name](https://count.getloli.com/@astrbot_plugin_qbittorrent_manager?name=astrbot_plugin_qbittorrent_manager&theme=booru-lewd&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
-
 # AstrBot qBittorrent Manager
 
 _✨ 在 QQ 群中搜索 PT 种子，并一键推送到 qBittorrent 下载 ✨_
