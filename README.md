@@ -8,7 +8,7 @@ _✨ 在 QQ 群中搜索 PT 种子，并一键推送到 qBittorrent 下载 ✨_
 
 <img src="https://img.shields.io/badge/AstrBot-Plugin-blue" alt="AstrBot Plugin">
 <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python">
-<img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
+<img src="https://img.shields.io/badge/License-AGPL--3.0-yellow" alt="License">
 
 </div>
 
@@ -132,4 +132,4 @@ HTTPS_PROXY=http://127.0.0.1:7897
 
 ## 📄 开源协议
 
-本项目使用 MIT License 开源。
+本项目使用 GNU Affero General Public License v3.0（AGPL-3.0）开源。
