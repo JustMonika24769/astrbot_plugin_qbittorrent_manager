@@ -1,5 +1,5 @@
 name: astrbot_plugin_qbittorrent_manager
-desc: 在 QQ 群通过 PT 站搜索种子，并推送到 qBittorrent 下载。
+desc: 在 QQ 群通过 PT 站搜索种子，并推送到 qBittorrent 或 uTorrent 下载。
 help: |
   /种子 关键词 - 搜索种子
   /种子下载 序号 - 添加到 qBittorrent

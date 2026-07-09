@@ -17,6 +17,12 @@
     "hint": "从浏览器开发者工具复制 Cookie 请求头",
     "default": ""
   },
+  "download_client": {
+    "description": "下载客户端类型，可选 qbittorrent 或 utorrent。",
+    "type": "string",
+    "hint": "qbittorrent / utorrent",
+    "default": "qbittorrent"
+  },
   "qb_url": {
     "description": "qBittorrent WebUI 地址。",
     "type": "string",
@@ -51,6 +57,24 @@
     "description": "添加任务后是否暂停。",
     "type": "bool",
     "default": false
+  },
+  "ut_url": {
+    "description": "uTorrent WebUI 地址，选择 utorrent 时必填。",
+    "type": "string",
+    "hint": "http://127.0.0.1:8080",
+    "default": ""
+  },
+  "ut_username": {
+    "description": "uTorrent WebUI 用户名。",
+    "type": "string",
+    "hint": "可留空",
+    "default": ""
+  },
+  "ut_password": {
+    "description": "uTorrent WebUI 密码。",
+    "type": "string",
+    "hint": "可留空",
+    "default": ""
   },
   "max_results": {
     "description": "每次搜索最多返回结果数。",
