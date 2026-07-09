@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 from astrbot.api import logger
@@ -44,6 +44,12 @@ class TorrentFile:
     filename: str
     content: bytes
     content_type: str
+
+
+@dataclass
+class DirectDownload:
+    uri: str
+    title: str
 
 
 @register(
@@ -127,6 +133,44 @@ class QBittorrentManagerPlugin(Star):
 
         yield event.plain_result(f"已添加到 {client_name}：{torrent.title}")
 
+    @filter.command("直接下载")
+    async def direct_download(self, event: AstrMessageEvent, uri: str = ""):
+        uri = uri.strip()
+        if not uri:
+            yield event.plain_result(
+                "请发送 /直接下载 磁链或种子链接，例如：/直接下载 magnet:?xt=..."
+            )
+            return
+        if not self._is_supported_direct_uri(uri):
+            yield event.plain_result(
+                "链接格式不支持，请提供 magnet、http 或 https 链接。"
+            )
+            return
+
+        client_name = self._download_client_name()
+        try:
+            direct_download = DirectDownload(uri=uri, title=self._direct_title(uri))
+            await self._add_direct_download(direct_download)
+        except UserFacingError as error:
+            yield event.plain_result(str(error))
+            return
+        except Exception as error:  # noqa: BLE001
+            logger.exception("添加直接下载任务失败")
+            yield event.plain_result(f"添加下载失败：{error}")
+            return
+
+        yield event.plain_result(f"已添加到 {client_name}：{direct_download.title}")
+
+    @filter.command("磁链下载")
+    async def magnet_download(self, event: AstrMessageEvent, uri: str = ""):
+        async for result in self.direct_download(event, uri):
+            yield result
+
+    @filter.command("链接下载")
+    async def link_download(self, event: AstrMessageEvent, uri: str = ""):
+        async for result in self.direct_download(event, uri):
+            yield result
+
     @filter.command("种子帮助")
     async def torrent_help(self, event: AstrMessageEvent):
         yield event.plain_result(self._help_text())
@@ -209,6 +253,25 @@ class QBittorrentManagerPlugin(Star):
             return
         await self._add_to_qbittorrent(torrent_file)
 
+    async def _add_direct_download(self, direct_download: DirectDownload):
+        if direct_download.uri.lower().startswith("magnet:"):
+            await self._add_uri_to_download_client(direct_download.uri)
+            return
+
+        torrent_file = await self._download_torrent_from_url(direct_download.uri)
+        client_type = self._download_client_type()
+        if client_type == "utorrent":
+            await self._add_to_utorrent(torrent_file)
+            return
+        await self._add_to_qbittorrent(torrent_file)
+
+    async def _add_uri_to_download_client(self, uri: str):
+        client_type = self._download_client_type()
+        if client_type == "utorrent":
+            await self._add_uri_to_utorrent(uri)
+            return
+        await self._add_uri_to_qbittorrent(uri)
+
     async def _download_torrent_file(self, torrent: TorrentResult) -> TorrentFile:
         provider = self._provider_config()
         async with self._http_client(provider) as pt_client:
@@ -223,6 +286,35 @@ class QBittorrentManagerPlugin(Star):
             ),
         )
 
+    async def _download_torrent_from_url(self, uri: str) -> TorrentFile:
+        provider = self._provider_config()
+        async with self._http_client(provider) as client:
+            response = await client.get(uri)
+            self._raise_for_response(response, "下载种子链接失败")
+
+        max_size = (
+            self._int_config("direct_torrent_max_size_mb", 50, 1, 500) * 1024 * 1024
+        )
+        if len(response.content) > max_size:
+            raise UserFacingError(
+                "种子链接响应过大，已拒绝上传。请确认链接会直接下载 .torrent 文件。"
+            )
+
+        if not self._looks_like_torrent_response(uri, response):
+            raise UserFacingError(
+                "该链接不像 .torrent 文件。如果这是磁链请以 magnet:? 开头；"
+                "如果是普通下载链接，请确认浏览器打开会直接下载种子文件。"
+            )
+
+        filename = self._filename_from_response(uri, response)
+        return TorrentFile(
+            filename=filename,
+            content=response.content,
+            content_type=response.headers.get(
+                "content-type", "application/x-bittorrent"
+            ).split(";")[0],
+        )
+
     async def _add_to_qbittorrent(self, torrent_file: TorrentFile):
         qb_config = self._qbittorrent_config()
         save_path = (self.config.get("qb_save_path") or "").strip()
@@ -233,17 +325,7 @@ class QBittorrentManagerPlugin(Star):
             base_url=qb_config["url"],
             timeout=self._float_config("request_timeout", 20.0, 5.0, 120.0),
         ) as qb_client:
-            if qb_config["username"] or qb_config["password"]:
-                login_response = await qb_client.post(
-                    "/api/v2/auth/login",
-                    data={
-                        "username": qb_config["username"],
-                        "password": qb_config["password"],
-                    },
-                )
-                self._raise_for_response(login_response, "qBittorrent 登录失败")
-                if login_response.text.strip().lower() != "ok.":
-                    raise UserFacingError("qBittorrent 登录失败，请检查用户名和密码。")
+            await self._login_qbittorrent(qb_client, qb_config)
 
             data: dict[str, Any] = {"paused": "true" if paused else "false"}
             if save_path:
@@ -267,25 +349,43 @@ class QBittorrentManagerPlugin(Star):
                     f"qBittorrent 返回异常：{add_response.text[:120]}"
                 )
 
-    async def _add_to_utorrent(self, torrent_file: TorrentFile):
-        ut_config = self._utorrent_config()
-        auth = None
-        if ut_config["username"] or ut_config["password"]:
-            auth = (ut_config["username"], ut_config["password"])
+    async def _add_uri_to_qbittorrent(self, uri: str):
+        qb_config = self._qbittorrent_config()
+        save_path = (self.config.get("qb_save_path") or "").strip()
+        category = (self.config.get("qb_category") or "").strip()
+        paused = bool(self.config.get("qb_paused", False))
 
         async with httpx.AsyncClient(
+            base_url=qb_config["url"],
+            timeout=self._float_config("request_timeout", 20.0, 5.0, 120.0),
+        ) as qb_client:
+            await self._login_qbittorrent(qb_client, qb_config)
+
+            data: dict[str, Any] = {
+                "urls": uri,
+                "paused": "true" if paused else "false",
+            }
+            if save_path:
+                data["savepath"] = save_path
+            if category:
+                data["category"] = category
+
+            add_response = await qb_client.post("/api/v2/torrents/add", data=data)
+            self._raise_for_response(add_response, "qBittorrent 添加链接失败")
+            if add_response.text.strip().lower() not in {"ok.", "ok"}:
+                raise UserFacingError(
+                    f"qBittorrent 返回异常：{add_response.text[:120]}"
+                )
+
+    async def _add_to_utorrent(self, torrent_file: TorrentFile):
+        ut_config = self._utorrent_config()
+        async with httpx.AsyncClient(
             base_url=ut_config["url"],
-            auth=auth,
+            auth=self._utorrent_auth(ut_config),
             timeout=self._float_config("request_timeout", 20.0, 5.0, 120.0),
             follow_redirects=True,
         ) as ut_client:
-            token_response = await ut_client.get("/gui/token.html")
-            self._raise_for_response(token_response, "uTorrent 获取 Token 失败")
-            token = self._extract_utorrent_token(token_response.text)
-            if not token:
-                raise UserFacingError(
-                    "uTorrent 获取 Token 失败，请检查 WebUI 地址、账号密码和 WebUI 是否启用。"
-                )
+            token = await self._get_utorrent_token(ut_client)
 
             files = {
                 "torrent_file": (
@@ -303,6 +403,51 @@ class QBittorrentManagerPlugin(Star):
             body = add_response.text.strip().lower()
             if "invalid request" in body or "invalid token" in body:
                 raise UserFacingError(f"uTorrent 返回异常：{add_response.text[:120]}")
+
+    async def _add_uri_to_utorrent(self, uri: str):
+        ut_config = self._utorrent_config()
+        async with httpx.AsyncClient(
+            base_url=ut_config["url"],
+            auth=self._utorrent_auth(ut_config),
+            timeout=self._float_config("request_timeout", 20.0, 5.0, 120.0),
+            follow_redirects=True,
+        ) as ut_client:
+            token = await self._get_utorrent_token(ut_client)
+            add_response = await ut_client.get(
+                "/gui/",
+                params={"action": "add-url", "token": token, "s": uri},
+            )
+            self._raise_for_response(add_response, "uTorrent 添加链接失败")
+            body = add_response.text.strip().lower()
+            if "invalid request" in body or "invalid token" in body:
+                raise UserFacingError(f"uTorrent 返回异常：{add_response.text[:120]}")
+
+    async def _login_qbittorrent(
+        self, qb_client: httpx.AsyncClient, qb_config: dict[str, str]
+    ):
+        if not (qb_config["username"] or qb_config["password"]):
+            return
+
+        login_response = await qb_client.post(
+            "/api/v2/auth/login",
+            data={
+                "username": qb_config["username"],
+                "password": qb_config["password"],
+            },
+        )
+        self._raise_for_response(login_response, "qBittorrent 登录失败")
+        if login_response.text.strip().lower() != "ok.":
+            raise UserFacingError("qBittorrent 登录失败，请检查用户名和密码。")
+
+    async def _get_utorrent_token(self, ut_client: httpx.AsyncClient) -> str:
+        token_response = await ut_client.get("/gui/token.html")
+        self._raise_for_response(token_response, "uTorrent 获取 Token 失败")
+        token = self._extract_utorrent_token(token_response.text)
+        if not token:
+            raise UserFacingError(
+                "uTorrent 获取 Token 失败，请检查 WebUI 地址、账号密码和 WebUI 是否启用。"
+            )
+        return token
 
     async def _render_results(
         self, keyword: str, results: list[TorrentResult]
@@ -410,6 +555,12 @@ class QBittorrentManagerPlugin(Star):
         if self._download_client_type() == "utorrent":
             return "uTorrent"
         return "qBittorrent"
+
+    @staticmethod
+    def _utorrent_auth(ut_config: dict[str, str]) -> tuple[str, str] | None:
+        if ut_config["username"] or ut_config["password"]:
+            return ut_config["username"], ut_config["password"]
+        return None
 
     def _http_client(self, provider: dict[str, str]) -> httpx.AsyncClient:
         headers = {
@@ -524,6 +675,58 @@ class QBittorrentManagerPlugin(Star):
         return f"{filename or 'torrent'}.torrent"
 
     @staticmethod
+    def _is_supported_direct_uri(uri: str) -> bool:
+        lowered = uri.lower()
+        if lowered.startswith("magnet:?"):
+            return True
+        parsed = urlparse(uri)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    @staticmethod
+    def _direct_title(uri: str) -> str:
+        if uri.lower().startswith("magnet:?"):
+            display = uri[:80] + "..." if len(uri) > 80 else uri
+            return f"磁链任务 {display}"
+        parsed = urlparse(uri)
+        filename = Path(unquote(parsed.path)).name
+        return filename or parsed.netloc or "直接下载任务"
+
+    @staticmethod
+    def _looks_like_torrent_response(uri: str, response: httpx.Response) -> bool:
+        content_type = response.headers.get("content-type", "").lower()
+        content_disposition = response.headers.get("content-disposition", "").lower()
+        lowered_uri = uri.lower()
+        content = response.content.lstrip()
+
+        return (
+            "application/x-bittorrent" in content_type
+            or "application/octet-stream" in content_type
+            or ".torrent" in lowered_uri
+            or ".torrent" in content_disposition
+            or content.startswith(b"d")
+        )
+
+    @staticmethod
+    def _filename_from_response(uri: str, response: httpx.Response) -> str:
+        content_disposition = response.headers.get("content-disposition", "")
+        filename_match = re.search(
+            r'filename\*?=(?:UTF-8\'\')?["]?([^";]+)["]?',
+            content_disposition,
+            re.IGNORECASE,
+        )
+        if filename_match:
+            filename = unquote(filename_match.group(1)).strip()
+        else:
+            filename = Path(unquote(urlparse(uri).path)).name
+
+        filename = re.sub(r'[\\/:*?"<>|]+', "_", filename).strip()[:120]
+        if not filename:
+            filename = "direct-download.torrent"
+        if not filename.lower().endswith(".torrent"):
+            filename = f"{filename}.torrent"
+        return filename
+
+    @staticmethod
     def _extract_utorrent_token(response_text: str) -> str:
         match = re.search(
             r"<div[^>]+id=[\"']token[\"'][^>]*>([^<]+)</div>",
@@ -548,6 +751,7 @@ class QBittorrentManagerPlugin(Star):
             "种子下载助手：\n"
             "1. /种子 关键词 - 搜索 PT 站种子\n"
             "2. /种子下载 序号 - 将所选种子添加到下载客户端\n"
+            "3. /直接下载 磁链或种子链接 - 直接添加下载任务\n"
             "请先在插件配置中填写 PT Cookie 和下载客户端 WebUI 信息。"
         )
 

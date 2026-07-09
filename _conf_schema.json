@@ -76,6 +76,12 @@
     "hint": "可留空",
     "default": ""
   },
+  "direct_torrent_max_size_mb": {
+    "description": "直接下载 HTTP(S) 种子链接时允许的最大响应大小，防止误传大文件。",
+    "type": "int",
+    "hint": "1-500",
+    "default": 50
+  },
   "max_results": {
     "description": "每次搜索最多返回结果数。",
     "type": "int",

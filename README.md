@@ -26,7 +26,8 @@ _✨ 在 QQ 群中搜索 PT 种子，并一键推送到 qBittorrent / uTorrent �
 
 - 🔍 **群聊搜索**：使用 `/种子 关键词` 搜索 PT 站种子。
 - 🖼️ **卡片渲染**：使用 AstrBot t2i 服务将搜索结果渲染为图片卡片。
-- ⬇️ **一键下载**：使用 `/种子下载 序号` 将种子添加到 qBittorrent 或 uTorrent。
+- ⬇️ **一键下载**：使用 `/种子下载 序号` 将搜索结果添加到 qBittorrent 或 uTorrent。
+- 🔗 **直接下载**：使用 `/直接下载` 添加磁链或 HTTP(S) `.torrent` 链接。
 - 👥 **多人隔离**：按用户缓存搜索结果，避免群内多人选择互相干扰。
 - ⏱️ **选择超时**：搜索结果默认缓存 10 分钟，超时需重新搜索。
 - 🛡️ **友好容错**：处理无结果、序号错误、Cookie 失效、qBittorrent 登录失败、渲染失败等情况。
@@ -64,6 +65,7 @@ git clone <本仓库地址>
 | `ut_url` | 选择 uTorrent 时必填 | 空 | uTorrent WebUI 地址，例如 `http://127.0.0.1:8080`。 |
 | `ut_username` | 否 | 空 | uTorrent WebUI 用户名。 |
 | `ut_password` | 否 | 空 | uTorrent WebUI 密码。 |
+| `direct_torrent_max_size_mb` | 否 | `50` | 直接下载 HTTP(S) 种子链接时允许的最大响应大小，防止误传大文件。 |
 | `max_results` | 否 | `10` | 每次搜索最多展示的结果数，范围 `1-30`。 |
 | `cache_ttl_seconds` | 否 | `600` | 搜索结果等待选择的超时时间，默认 10 分钟。 |
 | `render_width` | 否 | `900` | 结果卡片渲染宽度，高度会按结果数自动计算。 |
@@ -101,6 +103,32 @@ access_token=你的真实值; ip_notice_ignore=1
 
 插件会下载第 1 个结果的 `.torrent` 文件，并上传到配置的下载客户端。
 
+### 直接添加磁链
+
+```text
+/直接下载 magnet:?xt=urn:btih:...
+```
+
+也可以使用别名：
+
+```text
+/磁链下载 magnet:?xt=urn:btih:...
+```
+
+### 直接添加种子链接
+
+```text
+/直接下载 https://example.com/example.torrent
+```
+
+也可以使用别名：
+
+```text
+/链接下载 https://example.com/example.torrent
+```
+
+HTTP(S) 链接会先由插件下载并校验为 `.torrent` 文件，再上传到下载客户端；磁链会直接交给下载客户端处理。
+
 ### 查看帮助
 
 ```text
@@ -115,6 +143,7 @@ access_token=你的真实值; ip_notice_ignore=1
 - 请确保 qBittorrent 已启用 WebUI。
 - `qb_url` 应填写 AstrBot 所在环境可访问的地址。
 - `qb_save_path` 和 `qb_category` 留空时，qBittorrent 会使用自身默认下载规则。
+- 磁链通过 qBittorrent Web API 的 URL 添加能力处理。
 
 ### uTorrent
 
@@ -122,6 +151,7 @@ access_token=你的真实值; ip_notice_ignore=1
 - 请确保 uTorrent 已启用 WebUI。
 - `ut_url` 填写 WebUI 根地址，例如 `http://127.0.0.1:8080`，不需要手动加 `/gui`。
 - 当前 uTorrent 支持上传 `.torrent` 文件添加任务；保存路径、分类、暂停等高级选项仍建议在 uTorrent 客户端内设置默认规则。
+- 磁链通过 uTorrent WebUI 的 `add-url` 能力处理。
 
 ### 网络地址
 
