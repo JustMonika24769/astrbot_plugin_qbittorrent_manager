@@ -4,6 +4,6 @@ help: |
   /种子 关键词 - 搜索种子
   /种子下载 序号 - 添加到 qBittorrent
   /种子帮助 - 查看帮助
-version: v0.1.0
+version: v0.1.1
 author: Codex
 repo: https://github.com/yourname/astrbot_plugin_qbittorrent_manager

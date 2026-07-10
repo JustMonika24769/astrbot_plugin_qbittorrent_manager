@@ -56,7 +56,7 @@ class DirectDownload:
     "astrbot_plugin_qbittorrent_manager",
     "Codex",
     "在 PT 站搜索种子并推送到 qBittorrent 下载。",
-    "0.1.0",
+    "0.1.1",
 )
 class QBittorrentManagerPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
@@ -199,6 +199,10 @@ class QBittorrentManagerPlugin(Star):
         seen: set[str] = set()
 
         for row in soup.find_all("tr"):
+            direct_cells = row.find_all("td", recursive=False)
+            if len(direct_cells) < 6:
+                continue
+
             download_link = row.find(
                 "a",
                 href=re.compile(r"(download|dl)\.php\?.*id=", re.IGNORECASE),
@@ -218,7 +222,7 @@ class QBittorrentManagerPlugin(Star):
             if not title:
                 continue
 
-            cells = [cell.get_text(" ", strip=True) for cell in row.find_all("td")]
+            cells = [cell.get_text(" ", strip=True) for cell in direct_cells]
             row_text = " ".join(cells)
             numbers = re.findall(r"\b\d+\b", row_text)
             size = self._extract_size(row_text)
@@ -637,8 +641,9 @@ class QBittorrentManagerPlugin(Star):
     @staticmethod
     def _extract_subtitle(cells: list[str], title: str) -> str:
         for cell in cells:
-            if title not in cell and len(cell) > 4:
-                return cell[:120]
+            subtitle = cell.replace(title, "", 1).strip()
+            if len(subtitle) > 4:
+                return subtitle[:120]
         return ""
 
     @staticmethod
