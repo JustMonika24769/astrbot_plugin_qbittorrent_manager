@@ -106,6 +106,30 @@
     "hint": "5-120",
     "default": 20
   },
+  "access_whitelist": {
+    "description": "插件用户白名单",
+    "type": "list",
+    "hint": "填写允许使用插件的 QQ 号。留空表示不启用白名单。",
+    "default": []
+  },
+  "access_blacklist": {
+    "description": "插件用户黑名单",
+    "type": "list",
+    "hint": "填写禁止使用插件的 QQ 号。普通用户同时命中两个名单时黑名单优先。",
+    "default": []
+  },
+  "access_admin_bypass": {
+    "description": "AstrBot 管理员是否绕过白名单和黑名单",
+    "type": "bool",
+    "hint": "管理员身份使用 AstrBot 中配置的管理员 ID 判断。",
+    "default": true
+  },
+  "global_config_admin_only": {
+    "description": "全局 PT 与下载客户端配置是否仅 AstrBot 管理员可用",
+    "type": "bool",
+    "hint": "开启后，普通用户不会继承上方全局配置，只使用自己的用户配置和插件内置默认值。",
+    "default": false
+  },
   "enable_user_config_commands": {
     "description": "是否允许用户在群聊或私聊中维护自己的配置。",
     "type": "bool",

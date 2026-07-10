@@ -72,11 +72,15 @@ class SavingConfig(dict):
 
 
 class FakeEvent:
-    def __init__(self, user_id):
+    def __init__(self, user_id, *, admin=False):
         self.user_id = user_id
+        self.admin = admin
 
     def get_sender_id(self):
         return self.user_id
+
+    def is_admin(self):
+        return self.admin
 
 
 def make_plugin(config):
@@ -152,7 +156,10 @@ class UserConfigTests(unittest.IsolatedAsyncioTestCase):
 
         overrides = self.instance._user_overrides("10002")
         rendered = self.instance._format_user_config(
-            "10002", self.instance._user_config(FakeEvent("10002")), overrides
+            "10002",
+            self.instance._user_config(FakeEvent("10002")),
+            overrides,
+            True,
         )
         self.assertEqual(overrides["qb_password"], "secret-value")
         self.assertNotIn("secret-value", rendered)
@@ -184,6 +191,64 @@ class UserConfigTests(unittest.IsolatedAsyncioTestCase):
                 "https://files.example/item.torrent", "https://pt.example/"
             )
         )
+
+
+class AccessControlTests(unittest.TestCase):
+    def test_blacklist_takes_priority_for_regular_users(self):
+        instance = make_plugin(
+            {
+                "access_whitelist": ["10001"],
+                "access_blacklist": ["10001"],
+                "access_admin_bypass": False,
+            }
+        )
+
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "黑名单"):
+            instance._ensure_user_access(FakeEvent("10001"))
+
+    def test_nonempty_whitelist_rejects_other_users(self):
+        instance = make_plugin({"access_whitelist": ["10001"]})
+
+        instance._ensure_user_access(FakeEvent("10001"))
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "白名单"):
+            instance._ensure_user_access(FakeEvent("10002"))
+
+    def test_admin_can_bypass_access_lists(self):
+        instance = make_plugin(
+            {
+                "access_whitelist": ["10001"],
+                "access_blacklist": ["90001"],
+                "access_admin_bypass": True,
+            }
+        )
+
+        instance._ensure_user_access(FakeEvent("90001", admin=True))
+
+    def test_global_config_can_be_limited_to_admins(self):
+        instance = make_plugin(
+            {
+                "global_config_admin_only": True,
+                "qb_url": "http://global:8080",
+                "provider_cookie": "global-cookie",
+                "user_profiles": [
+                    {
+                        "__template_key": "user",
+                        "qq": "10001",
+                        "qb_username": "personal-user",
+                    }
+                ],
+            }
+        )
+
+        regular_config = instance._user_config(FakeEvent("10001"))
+        admin_config = instance._user_config(FakeEvent("90001", admin=True))
+
+        self.assertEqual(regular_config["qb_username"], "personal-user")
+        self.assertEqual(regular_config["qb_url"], "")
+        self.assertEqual(regular_config["provider_cookie"], "")
+        self.assertEqual(regular_config["provider_base_url"], "https://www.tjupt.org/")
+        self.assertEqual(admin_config["qb_url"], "http://global:8080")
+        self.assertEqual(admin_config["provider_cookie"], "global-cookie")
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ CARD_TEMPLATE = PLUGIN_DIR / "templates" / "torrent_results.html"
 DEFAULT_RENDER_WIDTH = 900
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,27 @@ USER_CONFIG_FIELDS = {
     "cache_ttl_seconds": ConfigField("搜索缓存时间（秒）", "int", 60, 3600),
     "render_width": ConfigField("结果卡片宽度", "int", 640, 1400),
     "request_timeout": ConfigField("请求超时（秒）", "float", 5, 120),
+}
+
+BUILTIN_USER_CONFIG = {
+    "provider_base_url": "https://www.tjupt.org/",
+    "provider_search_path": "torrents.php?search={keyword}&incldead=0",
+    "provider_cookie": "",
+    "download_client": "qbittorrent",
+    "qb_url": "",
+    "qb_username": "",
+    "qb_password": "",
+    "qb_save_path": "",
+    "qb_category": "",
+    "qb_paused": False,
+    "ut_url": "",
+    "ut_username": "",
+    "ut_password": "",
+    "direct_torrent_max_size_mb": 50,
+    "max_results": 10,
+    "cache_ttl_seconds": 600,
+    "render_width": 900,
+    "request_timeout": 20.0,
 }
 
 CONFIG_KEY_ALIASES = {
@@ -124,6 +145,12 @@ class QBittorrentManagerPlugin(Star):
 
     @filter.command("种子")
     async def search_torrents(self, event: AstrMessageEvent, keyword: str = ""):
+        try:
+            self._ensure_user_access(event)
+        except UserFacingError as error:
+            yield event.plain_result(str(error))
+            return
+
         keyword = keyword.strip()
         if not keyword:
             yield event.plain_result(self._help_text())
@@ -160,6 +187,12 @@ class QBittorrentManagerPlugin(Star):
 
     @filter.command("种子下载")
     async def download_torrent(self, event: AstrMessageEvent, selection: str = ""):
+        try:
+            self._ensure_user_access(event)
+        except UserFacingError as error:
+            yield event.plain_result(str(error))
+            return
+
         selection = selection.strip()
         if not selection:
             yield event.plain_result("请发送 /种子下载 序号，例如：/种子下载 1")
@@ -195,6 +228,12 @@ class QBittorrentManagerPlugin(Star):
 
     @filter.command("直接下载")
     async def direct_download(self, event: AstrMessageEvent, uri: str = ""):
+        try:
+            self._ensure_user_access(event)
+        except UserFacingError as error:
+            yield event.plain_result(str(error))
+            return
+
         uri = uri.strip()
         if not uri:
             yield event.plain_result(
@@ -234,6 +273,11 @@ class QBittorrentManagerPlugin(Star):
 
     @filter.command("种子帮助")
     async def torrent_help(self, event: AstrMessageEvent):
+        try:
+            self._ensure_user_access(event)
+        except UserFacingError as error:
+            yield event.plain_result(str(error))
+            return
         yield event.plain_result(self._help_text())
 
     @filter.command_group("种子配置")
@@ -243,6 +287,7 @@ class QBittorrentManagerPlugin(Star):
     @torrent_config.command("查看")
     async def show_user_config(self, event: AstrMessageEvent):
         try:
+            self._ensure_user_access(event)
             user_id = self._user_id(event)
             user_config = self._user_config(event)
             overrides = self._user_overrides(user_id)
@@ -251,7 +296,12 @@ class QBittorrentManagerPlugin(Star):
             return
 
         yield event.plain_result(
-            self._format_user_config(user_id, user_config, overrides)
+            self._format_user_config(
+                user_id,
+                user_config,
+                overrides,
+                self._can_use_global_config(event),
+            )
         )
 
     @torrent_config.command("设置")
@@ -261,11 +311,10 @@ class QBittorrentManagerPlugin(Star):
         key: str,
         value: GreedyStr,
     ):
-        if not self._user_config_commands_enabled():
-            yield event.plain_result("管理员已关闭用户自助配置。")
-            return
-
         try:
+            self._ensure_user_access(event)
+            if not self._user_config_commands_enabled():
+                raise UserFacingError("管理员已关闭用户自助配置。")
             user_id = self._user_id(event)
             config_key = self._resolve_config_key(key)
             config_value = self._parse_user_config_value(config_key, str(value))
@@ -286,11 +335,10 @@ class QBittorrentManagerPlugin(Star):
         event: AstrMessageEvent,
         key: str,
     ):
-        if not self._user_config_commands_enabled():
-            yield event.plain_result("管理员已关闭用户自助配置。")
-            return
-
         try:
+            self._ensure_user_access(event)
+            if not self._user_config_commands_enabled():
+                raise UserFacingError("管理员已关闭用户自助配置。")
             user_id = self._user_id(event)
             config_key = self._resolve_config_key(key)
             removed = await self._delete_user_override(user_id, config_key)
@@ -307,11 +355,10 @@ class QBittorrentManagerPlugin(Star):
 
     @torrent_config.command("重置")
     async def reset_user_config(self, event: AstrMessageEvent):
-        if not self._user_config_commands_enabled():
-            yield event.plain_result("管理员已关闭用户自助配置。")
-            return
-
         try:
+            self._ensure_user_access(event)
+            if not self._user_config_commands_enabled():
+                raise UserFacingError("管理员已关闭用户自助配置。")
             user_id = self._user_id(event)
             removed = await self._reset_user_overrides(user_id)
         except UserFacingError as error:
@@ -325,6 +372,11 @@ class QBittorrentManagerPlugin(Star):
 
     @torrent_config.command("帮助")
     async def user_config_help(self, event: AstrMessageEvent):
+        try:
+            self._ensure_user_access(event)
+        except UserFacingError as error:
+            yield event.plain_result(str(error))
+            return
         yield event.plain_result(self._user_config_help_text())
 
     async def _search(
@@ -839,13 +891,48 @@ class QBittorrentManagerPlugin(Star):
             raise UserFacingError("无法识别你的 QQ 号，暂时不能使用该功能。")
         return user_id
 
+    def _ensure_user_access(self, event: AstrMessageEvent):
+        user_id = self._user_id(event)
+        if self._admins_bypass_access_control() and event.is_admin():
+            return
+
+        blacklist = self._configured_user_ids("access_blacklist")
+        if user_id in blacklist:
+            raise UserFacingError("你已被加入插件黑名单，无法使用该功能。")
+
+        whitelist = self._configured_user_ids("access_whitelist")
+        if whitelist and user_id not in whitelist:
+            raise UserFacingError("你不在插件白名单中，无法使用该功能。")
+
+    def _configured_user_ids(self, key: str) -> set[str]:
+        value = self.config.get(key, [])
+        if isinstance(value, str):
+            candidates = re.split(r"[\s,，;；]+", value)
+        elif isinstance(value, list | tuple | set):
+            candidates = value
+        else:
+            return set()
+        return {str(item).strip() for item in candidates if str(item).strip()}
+
+    def _admins_bypass_access_control(self) -> bool:
+        return bool(self.config.get("access_admin_bypass", True))
+
+    def _can_use_global_config(self, event: AstrMessageEvent) -> bool:
+        if not bool(self.config.get("global_config_admin_only", False)):
+            return True
+        return event.is_admin()
+
     def _user_config(self, event: AstrMessageEvent) -> dict[str, Any]:
         user_id = self._user_id(event)
-        merged = {
-            key: self.config.get(key)
-            for key in USER_CONFIG_FIELDS
-            if key in self.config
-        }
+        merged: dict[str, Any] = dict(BUILTIN_USER_CONFIG)
+        if self._can_use_global_config(event):
+            merged.update(
+                {
+                    key: self.config.get(key)
+                    for key in USER_CONFIG_FIELDS
+                    if key in self.config
+                }
+            )
         merged.update(self._user_overrides(user_id))
         return merged
 
@@ -1001,8 +1088,13 @@ class QBittorrentManagerPlugin(Star):
         user_id: str,
         user_config: dict[str, Any],
         overrides: dict[str, Any],
+        global_config_allowed: bool,
     ) -> str:
         lines = [f"QQ {user_id} 的种子配置："]
+        if global_config_allowed:
+            lines.append("全局配置：允许继承")
+        else:
+            lines.append("全局配置：仅管理员可用，当前仅使用个人或内置默认配置")
         for key, field in USER_CONFIG_FIELDS.items():
             value = user_config.get(key)
             if field.sensitive:
@@ -1013,7 +1105,12 @@ class QBittorrentManagerPlugin(Star):
                 display = "未设置"
             else:
                 display = str(value)
-            source = "个人" if key in overrides else "默认"
+            if key in overrides:
+                source = "个人"
+            elif global_config_allowed and key in self.config:
+                source = "全局"
+            else:
+                source = "内置"
             lines.append(f"{field.label}：{display}（{source}）")
         lines.append("发送 /种子配置 帮助 查看设置方法。")
         return "\n".join(lines)

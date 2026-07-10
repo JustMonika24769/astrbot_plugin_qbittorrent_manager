@@ -71,6 +71,10 @@ git clone <本仓库地址>
 | `cache_ttl_seconds` | 否 | `600` | 搜索结果等待选择的超时时间，默认 10 分钟。 |
 | `render_width` | 否 | `900` | 结果卡片渲染宽度，高度会按结果数自动计算。 |
 | `request_timeout` | 否 | `20` | 网络请求超时时间，单位秒。 |
+| `access_whitelist` | 否 | 空列表 | 插件用户白名单。非空时仅列表中的 QQ 用户可以使用插件。 |
+| `access_blacklist` | 否 | 空列表 | 插件用户黑名单。禁止列表中的 QQ 用户使用插件。 |
+| `access_admin_bypass` | 否 | `true` | AstrBot 管理员是否绕过插件白名单和黑名单。 |
+| `global_config_admin_only` | 否 | `false` | 是否仅允许 AstrBot 管理员继承全局 PT 和下载客户端配置。 |
 | `enable_user_config_commands` | 否 | `true` | 是否允许用户通过消息命令维护个人配置。 |
 | `user_profiles` | 否 | 空列表 | 按 QQ 号维护的用户独立配置，可在面板中添加多条。 |
 
@@ -83,6 +87,18 @@ QQ 用户独立配置 > AstrBot 面板全局默认配置 > 插件内置默认值
 ```
 
 面板中的每条用户配置需要填写 QQ 号，并可独立设置 PT 站点、搜索路径、Cookie、下载客户端、WebUI 地址、账号密码、保存路径、结果数量、缓存时间和请求超时等参数。
+
+开启 `global_config_admin_only` 后，普通用户不会继承 AstrBot 面板中的全局 PT Cookie、WebUI 地址和账号密码。普通用户仍可使用自己的 `user_profiles` 配置，未设置的项目回退到插件内置默认值；AstrBot 管理员仍按上述完整优先级使用配置。
+
+### 权限控制
+
+- `access_blacklist` 命中的用户会被拒绝使用搜索、下载、帮助和个人配置命令。
+- `access_whitelist` 为空时不限制普通用户；非空时仅白名单用户可用。
+- 普通用户同时出现在白名单和黑名单时，黑名单优先。
+- `access_admin_bypass` 开启时，AstrBot 中配置的管理员 ID 不受白名单和黑名单限制。
+- 关闭管理员绕过后，管理员与普通用户遵循相同的白名单和黑名单规则。
+
+管理员身份直接使用 AstrBot 消息事件的管理员权限判断，不需要在本插件中重复填写管理员 QQ 号。
 
 ## 🍪 Cookie 填写说明
 
@@ -238,6 +254,7 @@ HTTPS_PROXY=http://127.0.0.1:7897
 - 请遵守所在地法律法规，插件仅提供任务添加能力。
 - Cookie、qBittorrent/uTorrent 密码等敏感配置请妥善保管，建议仅通过 AstrBot 面板或机器人私聊设置。
 - 开启用户自助配置后，机器人所在环境必须能够访问用户填写的 PT 和 WebUI 地址。
+- 建议在公开群聊中启用白名单，或至少维护黑名单并限制全局配置仅管理员使用。
 
 ## 📄 开源协议
 
