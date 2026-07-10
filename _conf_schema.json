@@ -105,5 +105,143 @@
     "type": "float",
     "hint": "5-120",
     "default": 20
+  },
+  "enable_user_config_commands": {
+    "description": "是否允许用户在群聊或私聊中维护自己的配置。",
+    "type": "bool",
+    "default": true
+  },
+  "user_profiles": {
+    "description": "QQ 用户独立配置",
+    "type": "template_list",
+    "hint": "按 QQ 号维护独立的 PT 站点和下载客户端配置。用户也可以通过 /种子配置 命令自行维护。",
+    "default": [],
+    "templates": {
+      "user": {
+        "name": "QQ 用户配置",
+        "description": "QQ 用户配置",
+        "items": {
+          "qq": {
+            "description": "QQ 号",
+            "type": "string",
+            "hint": "必须与消息事件中的发送者 QQ 号一致。",
+            "default": ""
+          },
+          "provider_base_url": {
+            "description": "PT 站点地址",
+            "type": "string",
+            "hint": "https://www.tjupt.org/",
+            "default": "https://www.tjupt.org/"
+          },
+          "provider_search_path": {
+            "description": "搜索路径",
+            "type": "string",
+            "hint": "必须包含 {keyword} 占位符。",
+            "default": "torrents.php?search={keyword}&incldead=0"
+          },
+          "provider_cookie": {
+            "description": "PT 站登录 Cookie",
+            "type": "string",
+            "hint": "敏感信息，请勿公开。",
+            "default": ""
+          },
+          "download_client": {
+            "description": "下载客户端",
+            "type": "string",
+            "hint": "qbittorrent / utorrent",
+            "options": ["qbittorrent", "utorrent"],
+            "default": "qbittorrent"
+          },
+          "qb_url": {
+            "description": "qBittorrent WebUI 地址",
+            "type": "string",
+            "hint": "http://127.0.0.1:8080",
+            "default": "",
+            "condition": {"download_client": "qbittorrent"}
+          },
+          "qb_username": {
+            "description": "qBittorrent 用户名",
+            "type": "string",
+            "default": "",
+            "condition": {"download_client": "qbittorrent"}
+          },
+          "qb_password": {
+            "description": "qBittorrent 密码",
+            "type": "string",
+            "hint": "敏感信息，请勿公开。",
+            "default": "",
+            "condition": {"download_client": "qbittorrent"}
+          },
+          "qb_save_path": {
+            "description": "qBittorrent 保存路径",
+            "type": "string",
+            "default": "",
+            "condition": {"download_client": "qbittorrent"}
+          },
+          "qb_category": {
+            "description": "qBittorrent 分类",
+            "type": "string",
+            "default": "",
+            "condition": {"download_client": "qbittorrent"}
+          },
+          "qb_paused": {
+            "description": "添加任务后是否暂停",
+            "type": "bool",
+            "default": false,
+            "condition": {"download_client": "qbittorrent"}
+          },
+          "ut_url": {
+            "description": "uTorrent WebUI 地址",
+            "type": "string",
+            "hint": "http://127.0.0.1:8080",
+            "default": "",
+            "condition": {"download_client": "utorrent"}
+          },
+          "ut_username": {
+            "description": "uTorrent 用户名",
+            "type": "string",
+            "default": "",
+            "condition": {"download_client": "utorrent"}
+          },
+          "ut_password": {
+            "description": "uTorrent 密码",
+            "type": "string",
+            "hint": "敏感信息，请勿公开。",
+            "default": "",
+            "condition": {"download_client": "utorrent"}
+          },
+          "direct_torrent_max_size_mb": {
+            "description": "直链种子大小上限（MB）",
+            "type": "int",
+            "hint": "1-500",
+            "default": 50
+          },
+          "max_results": {
+            "description": "最大搜索结果数",
+            "type": "int",
+            "hint": "1-30",
+            "default": 10
+          },
+          "cache_ttl_seconds": {
+            "description": "搜索缓存时间（秒）",
+            "type": "int",
+            "hint": "60-3600",
+            "default": 600
+          },
+          "render_width": {
+            "description": "结果卡片宽度",
+            "type": "int",
+            "hint": "640-1400",
+            "default": 900
+          },
+          "request_timeout": {
+            "description": "请求超时（秒）",
+            "type": "float",
+            "hint": "5-120",
+            "default": 20
+          }
+        }
+      }
+    }
   }
 }

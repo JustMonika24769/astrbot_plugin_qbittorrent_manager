@@ -2,7 +2,7 @@
 
 # AstrBot qBittorrent Manager
 
-_✨ 在 QQ 群中搜索 PT 种子，并一键推送到 qBittorrent / uTorrent 下载 ✨_
+_✨ 按 QQ 用户独立配置 PT 站，并推送到 qBittorrent / uTorrent 下载 ✨_
 
 <img src="https://img.shields.io/badge/AstrBot-Plugin-blue" alt="AstrBot Plugin">
 <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python">
@@ -14,7 +14,7 @@ _✨ 在 QQ 群中搜索 PT 种子，并一键推送到 qBittorrent / uTorrent �
 
 这是一个基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的下载客户端管理插件。
 
-插件支持用户在 QQ 群中通过命令搜索 PT 站种子，默认适配北洋园 PT（天津大学 PT 站），搜索结果会通过 AstrBot 自带的 t2i 服务渲染为卡片。用户选择序号后，插件会下载对应 `.torrent` 文件并上传到配置好的 qBittorrent 或 uTorrent 客户端。
+插件支持用户在 QQ 群或私聊中搜索 PT 站种子，默认适配北洋园 PT（天津大学 PT 站），搜索结果会通过 AstrBot 自带的 t2i 服务渲染为卡片。每位用户按照 QQ 号使用独立配置，可以选择自己的 PT 站点、Cookie、qBittorrent 或 uTorrent 客户端。
 
 > 默认面向 NexusPHP 风格站点设计，其他同类 PT 站可通过配置搜索地址适配。
 
@@ -28,7 +28,8 @@ _✨ 在 QQ 群中搜索 PT 种子，并一键推送到 qBittorrent / uTorrent �
 - 🖼️ **卡片渲染**：使用 AstrBot t2i 服务将搜索结果渲染为图片卡片。
 - ⬇️ **一键下载**：使用 `/种子下载 序号` 将搜索结果添加到 qBittorrent 或 uTorrent。
 - 🔗 **直接下载**：使用 `/直接下载` 添加磁链或 HTTP(S) `.torrent` 链接。
-- 👥 **多人隔离**：按用户缓存搜索结果，避免群内多人选择互相干扰。
+- 👥 **独立用户配置**：按 QQ 号隔离 PT 账号、下载客户端和搜索结果。
+- ⚙️ **双入口配置**：管理员可在 AstrBot 面板维护用户配置，用户也可在群聊或私聊中自行配置。
 - ⏱️ **选择超时**：搜索结果默认缓存 10 分钟，超时需重新搜索。
 - 🛡️ **友好容错**：处理无结果、序号错误、Cookie 失效、qBittorrent 登录失败、渲染失败等情况。
 
@@ -70,6 +71,18 @@ git clone <本仓库地址>
 | `cache_ttl_seconds` | 否 | `600` | 搜索结果等待选择的超时时间，默认 10 分钟。 |
 | `render_width` | 否 | `900` | 结果卡片渲染宽度，高度会按结果数自动计算。 |
 | `request_timeout` | 否 | `20` | 网络请求超时时间，单位秒。 |
+| `enable_user_config_commands` | 否 | `true` | 是否允许用户通过消息命令维护个人配置。 |
+| `user_profiles` | 否 | 空列表 | 按 QQ 号维护的用户独立配置，可在面板中添加多条。 |
+
+现有配置项作为全局默认值继续生效。`user_profiles` 中与发送者 QQ 号匹配的配置会覆盖全局默认值，因此旧版本升级后无需立即迁移；用户通过消息命令保存的配置也会写入 `user_profiles`。
+
+### 用户配置优先级
+
+```text
+QQ 用户独立配置 > AstrBot 面板全局默认配置 > 插件内置默认值
+```
+
+面板中的每条用户配置需要填写 QQ 号，并可独立设置 PT 站点、搜索路径、Cookie、下载客户端、WebUI 地址、账号密码、保存路径、结果数量、缓存时间和请求超时等参数。
 
 ## 🍪 Cookie 填写说明
 
@@ -86,6 +99,55 @@ access_token=你的真实值; ip_notice_ignore=1
 > `access_token` 等同登录凭证，请不要发到群聊、截图或公开仓库中。
 
 ## 🚀 使用方法
+
+### 配置个人账号
+
+查看当前生效配置：
+
+```text
+/种子配置 查看
+```
+
+设置配置项：
+
+```text
+/种子配置 设置 客户端 qbittorrent
+/种子配置 设置 站点 https://www.tjupt.org/
+/种子配置 设置 搜索路径 torrents.php?search={keyword}&incldead=0
+/种子配置 设置 cookie access_token=你的真实值
+/种子配置 设置 qb地址 http://127.0.0.1:8080
+/种子配置 设置 qb用户名 admin
+/种子配置 设置 qb密码 你的密码
+```
+
+uTorrent 用户可以设置：
+
+```text
+/种子配置 设置 客户端 utorrent
+/种子配置 设置 ut地址 http://127.0.0.1:8080
+/种子配置 设置 ut用户名 admin
+/种子配置 设置 ut密码 你的密码
+```
+
+删除单个个人配置并恢复全局默认值：
+
+```text
+/种子配置 删除 qb密码
+```
+
+清除自己的全部配置：
+
+```text
+/种子配置 重置
+```
+
+查看完整配置项和示例：
+
+```text
+/种子配置 帮助
+```
+
+配置命令在群聊和私聊中都可以使用。Cookie、WebUI 密码等敏感信息在机器人回复中只显示“已设置”，不会原文回显；但群聊中的原始命令仍可能被其他成员看到，建议在私聊中设置敏感项。
 
 ### 搜索种子
 
@@ -174,7 +236,8 @@ HTTPS_PROXY=http://127.0.0.1:7897
 - 本插件不会绕过 PT 站权限，搜索和下载均依赖有效登录 Cookie。
 - 请遵守 PT 站点规则，不要滥用搜索和下载功能。
 - 请遵守所在地法律法规，插件仅提供任务添加能力。
-- Cookie、qBittorrent 密码等敏感配置请妥善保管。
+- Cookie、qBittorrent/uTorrent 密码等敏感配置请妥善保管，建议仅通过 AstrBot 面板或机器人私聊设置。
+- 开启用户自助配置后，机器人所在环境必须能够访问用户填写的 PT 和 WebUI 地址。
 
 ## 📄 开源协议
 
