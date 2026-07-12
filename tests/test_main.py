@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+import time
 import types
 import unittest
 
@@ -82,6 +83,9 @@ class FakeEvent:
     def is_admin(self):
         return self.admin
 
+    def plain_result(self, message):
+        return message
+
 
 def make_plugin(config):
     instance = plugin_module.QBittorrentManagerPlugin.__new__(
@@ -91,6 +95,23 @@ def make_plugin(config):
     instance._config_lock = asyncio.Lock()
     instance._search_cache = {}
     return instance
+
+
+def make_results(count):
+    return [
+        plugin_module.TorrentResult(
+            index=index,
+            title=f"种子 {index}",
+            subtitle="",
+            size="1 GiB",
+            seeders="1",
+            leechers="0",
+            completed="1",
+            detail_url=f"https://example.com/details.php?id={index}",
+            download_url=f"https://example.com/download.php?id={index}",
+        )
+        for index in range(1, count + 1)
+    ]
 
 
 class ParserTests(unittest.TestCase):
@@ -249,6 +270,66 @@ class AccessControlTests(unittest.TestCase):
         self.assertEqual(regular_config["provider_base_url"], "https://www.tjupt.org/")
         self.assertEqual(admin_config["qb_url"], "http://global:8080")
         self.assertEqual(admin_config["provider_cookie"], "global-cookie")
+
+    def test_legacy_event_admin_role_is_supported(self):
+        class LegacyEvent:
+            role = "admin"
+
+            def get_sender_id(self):
+                return "90001"
+
+        instance = make_plugin(
+            {
+                "access_blacklist": ["90001"],
+                "access_admin_bypass": True,
+            }
+        )
+
+        instance._ensure_user_access(LegacyEvent())
+
+
+class BatchDownloadTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.instance = make_plugin({})
+        self.results = make_results(5)
+
+    def test_multiple_indexes_are_selected_in_order(self):
+        selected = self.instance._pick_results("1 3 5", self.results)
+
+        self.assertEqual([torrent.index for torrent in selected], [1, 3, 5])
+
+    def test_commas_and_duplicate_indexes_are_supported(self):
+        selected = self.instance._pick_results("1,3，3 5", self.results)
+
+        self.assertEqual([torrent.index for torrent in selected], [1, 3, 5])
+
+    def test_any_out_of_range_index_rejects_the_whole_selection(self):
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "无效序号：4、6"):
+            self.instance._pick_results("1 4 6", make_results(3))
+
+    def test_non_numeric_index_is_rejected(self):
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "序号格式错误：abc"):
+            self.instance._pick_results("1 abc 3", self.results)
+
+    async def test_handler_reports_partial_client_failures(self):
+        event = FakeEvent("10001")
+        self.instance._search_cache["10001"] = (
+            time.time(),
+            600,
+            make_results(3),
+        )
+
+        async def fake_add(torrent, _user_config):
+            if torrent.index == 2:
+                raise plugin_module.UserFacingError("客户端拒绝任务")
+
+        self.instance._add_to_download_client = fake_add
+
+        response = await anext(self.instance.download_torrent(event, "1 2 3"))
+
+        self.assertIn("已添加到 qBittorrent：2 个任务", response)
+        self.assertIn("添加失败：1 个任务", response)
+        self.assertIn("2. 种子 2：客户端拒绝任务", response)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ CARD_TEMPLATE = PLUGIN_DIR / "templates" / "torrent_results.html"
 DEFAULT_RENDER_WIDTH = 900
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.2.0"
 
 
 @dataclass(frozen=True)
@@ -186,16 +186,16 @@ class QBittorrentManagerPlugin(Star):
         yield event.plain_result(self._format_plain_results(keyword, results))
 
     @filter.command("种子下载")
-    async def download_torrent(self, event: AstrMessageEvent, selection: str = ""):
+    async def download_torrent(self, event: AstrMessageEvent, selection: GreedyStr):
         try:
             self._ensure_user_access(event)
         except UserFacingError as error:
             yield event.plain_result(str(error))
             return
 
-        selection = selection.strip()
+        selection = str(selection).strip()
         if not selection:
-            yield event.plain_result("请发送 /种子下载 序号，例如：/种子下载 1")
+            yield event.plain_result("请发送 /种子下载 序号，例如：/种子下载 1 3 5")
             return
 
         try:
@@ -207,15 +207,8 @@ class QBittorrentManagerPlugin(Star):
                 )
                 return
 
-            torrent = self._pick_result(selection, results)
-            if torrent is None:
-                yield event.plain_result(
-                    f"无效序号：{selection}，请在 1-{len(results)} 之间选择。"
-                )
-                return
-
+            torrents = self._pick_results(selection, results)
             client_name = self._download_client_name(user_config)
-            await self._add_to_download_client(torrent, user_config)
         except UserFacingError as error:
             yield event.plain_result(str(error))
             return
@@ -224,7 +217,21 @@ class QBittorrentManagerPlugin(Star):
             yield event.plain_result(f"添加下载失败：{error}")
             return
 
-        yield event.plain_result(f"已添加到 {client_name}：{torrent.title}")
+        succeeded: list[TorrentResult] = []
+        failed: list[tuple[TorrentResult, str]] = []
+        for torrent in torrents:
+            try:
+                await self._add_to_download_client(torrent, user_config)
+                succeeded.append(torrent)
+            except UserFacingError as error:
+                failed.append((torrent, str(error)))
+            except Exception as error:  # noqa: BLE001
+                logger.exception("添加下载任务失败：%s", torrent.title)
+                failed.append((torrent, f"添加下载失败：{error}"))
+
+        yield event.plain_result(
+            self._format_batch_download_result(client_name, succeeded, failed)
+        )
 
     @filter.command("直接下载")
     async def direct_download(self, event: AstrMessageEvent, uri: str = ""):
@@ -893,7 +900,7 @@ class QBittorrentManagerPlugin(Star):
 
     def _ensure_user_access(self, event: AstrMessageEvent):
         user_id = self._user_id(event)
-        if self._admins_bypass_access_control() and event.is_admin():
+        if self._admins_bypass_access_control() and self._event_is_admin(event):
             return
 
         blacklist = self._configured_user_ids("access_blacklist")
@@ -920,7 +927,19 @@ class QBittorrentManagerPlugin(Star):
     def _can_use_global_config(self, event: AstrMessageEvent) -> bool:
         if not bool(self.config.get("global_config_admin_only", False)):
             return True
-        return event.is_admin()
+        return self._event_is_admin(event)
+
+    @staticmethod
+    def _event_is_admin(event: AstrMessageEvent) -> bool:
+        admin_value = getattr(event, "is_admin", None)
+        if callable(admin_value):
+            try:
+                return bool(admin_value())
+            except Exception:  # noqa: BLE001
+                logger.exception("读取 AstrBot 管理员状态失败")
+        elif admin_value is not None:
+            return bool(admin_value)
+        return getattr(event, "role", "member") == "admin"
 
     def _user_config(self, event: AstrMessageEvent) -> dict[str, Any]:
         user_id = self._user_id(event)
@@ -1115,15 +1134,51 @@ class QBittorrentManagerPlugin(Star):
         lines.append("发送 /种子配置 帮助 查看设置方法。")
         return "\n".join(lines)
 
-    def _pick_result(
-        self, selection: str, results: list[TorrentResult]
-    ) -> TorrentResult | None:
-        if not selection.isdigit():
-            return None
-        index = int(selection)
-        if index < 1 or index > len(results):
-            return None
-        return results[index - 1]
+    @staticmethod
+    def _pick_results(
+        selection: str, results: list[TorrentResult]
+    ) -> list[TorrentResult]:
+        tokens = [token for token in re.split(r"[\s,，]+", selection.strip()) if token]
+        if not tokens:
+            raise UserFacingError("请至少提供一个种子序号。")
+
+        invalid_tokens = [token for token in tokens if not token.isdigit()]
+        if invalid_tokens:
+            values = "、".join(invalid_tokens)
+            raise UserFacingError(f"序号格式错误：{values}，请只输入数字。")
+
+        indexes = list(dict.fromkeys(int(token) for token in tokens))
+        invalid_indexes = [
+            index for index in indexes if index < 1 or index > len(results)
+        ]
+        if invalid_indexes:
+            values = "、".join(str(index) for index in invalid_indexes)
+            raise UserFacingError(
+                f"无效序号：{values}，当前只有 {len(results)} 条结果，"
+                f"请在 1-{len(results)} 之间选择。"
+            )
+
+        return [results[index - 1] for index in indexes]
+
+    @staticmethod
+    def _format_batch_download_result(
+        client_name: str,
+        succeeded: list[TorrentResult],
+        failed: list[tuple[TorrentResult, str]],
+    ) -> str:
+        lines: list[str] = []
+        if succeeded:
+            lines.append(f"已添加到 {client_name}：{len(succeeded)} 个任务")
+            lines.extend(f"{torrent.index}. {torrent.title}" for torrent in succeeded)
+        if failed:
+            if lines:
+                lines.append("")
+            lines.append(f"添加失败：{len(failed)} 个任务")
+            lines.extend(
+                f"{torrent.index}. {torrent.title}：{reason}"
+                for torrent, reason in failed
+            )
+        return "\n".join(lines) or "没有可添加的下载任务。"
 
     @staticmethod
     def _extract_title(detail_link: Any, row: Any) -> str:
@@ -1244,7 +1299,7 @@ class QBittorrentManagerPlugin(Star):
                 f"{result.index}. {result.title}\n"
                 f"   大小：{result.size} 做种：{result.seeders} 下载：{result.leechers}"
             )
-        lines.append("发送 /种子下载 序号 添加到下载客户端。")
+        lines.append("发送 /种子下载 序号... 批量添加到下载客户端。")
         return "\n".join(lines)
 
     @staticmethod
@@ -1252,7 +1307,7 @@ class QBittorrentManagerPlugin(Star):
         return (
             "种子下载助手：\n"
             "1. /种子 关键词 - 搜索 PT 站种子\n"
-            "2. /种子下载 序号 - 将所选种子添加到下载客户端\n"
+            "2. /种子下载 序号... - 批量添加所选种子到下载客户端\n"
             "3. /直接下载 磁链或种子链接 - 直接添加下载任务\n"
             "4. /种子配置 帮助 - 配置自己的 PT 与下载客户端\n"
             "每位用户按 QQ 号使用独立配置。"

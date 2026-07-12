@@ -2,9 +2,9 @@ name: astrbot_plugin_qbittorrent_manager
 desc: 按 QQ 用户独立配置 PT 站与下载客户端，支持搜索种子和直接添加下载任务。
 help: |
   /种子 关键词 - 搜索种子
-  /种子下载 序号 - 添加到个人下载客户端
+  /种子下载 序号... - 批量添加到个人下载客户端
   /种子配置 帮助 - 配置个人 PT 与下载客户端
   /种子帮助 - 查看帮助
-version: v1.1.0
-author: Codex
+version: v1.2.0
+author: Codex，JustMonika
 repo: https://github.com/yourname/astrbot_plugin_qbittorrent_manager
