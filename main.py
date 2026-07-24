@@ -33,7 +33,7 @@ CARD_TEMPLATE = PLUGIN_DIR / "templates" / "torrent_results.html"
 DEFAULT_RENDER_WIDTH = 900
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
-PLUGIN_VERSION = "1.3.0"
+PLUGIN_VERSION = "1.3.1"
 
 SORT_FIELD_ALIASES = {
     "time": "time",
@@ -75,6 +75,7 @@ NEXUSPHP_SORT_CODES = {
     "seeders": "7",
     "leechers": "8",
 }
+OPTION_PREFIX_PATTERN = r"(?:--|[－—–−]{1,2})"
 
 
 @dataclass(frozen=True)
@@ -201,9 +202,7 @@ class QBittorrentManagerPlugin(Star):
         self._config_lock = asyncio.Lock()
 
     @filter.command("种子")
-    async def search_torrents(
-        self, event: AstrMessageEvent, query: GreedyStr = GreedyStr("")
-    ):
+    async def search_torrents(self, event: AstrMessageEvent, query: GreedyStr):
         try:
             self._ensure_user_access(event)
         except UserFacingError as error:
@@ -1295,16 +1294,18 @@ class QBittorrentManagerPlugin(Star):
 
     @staticmethod
     def _parse_search_request(query: str) -> SearchRequest:
-        escaped_keyword = re.match(r"^--(?:\s+|$)", query)
+        escaped_keyword = re.match(rf"^{OPTION_PREFIX_PATTERN}(?:\s+|$)", query)
         if escaped_keyword:
             keyword = query[escaped_keyword.end() :].strip()
             if not keyword:
                 raise UserFacingError("缺少搜索关键词。")
             return SearchRequest(keyword=keyword)
 
-        delimiter = re.search(r"(?:^|\s)--(?:\s|$)", query)
+        delimiter = re.search(rf"(?:^|\s){OPTION_PREFIX_PATTERN}(?:\s|$)", query)
         starts_with_option = re.match(
-            r"^--(?:sort|order|排序|顺序)[=＝]", query, re.IGNORECASE
+            rf"^{OPTION_PREFIX_PATTERN}(?:sort|order|排序|顺序)[=＝]",
+            query,
+            re.IGNORECASE,
         )
         if not delimiter or not starts_with_option:
             return SearchRequest(keyword=query.strip())
@@ -1318,7 +1319,9 @@ class QBittorrentManagerPlugin(Star):
         descending = True
         order_was_set = False
         for token in options_text.split():
-            normalized = token.replace("＝", "=", 1)
+            normalized = re.sub(
+                rf"^{OPTION_PREFIX_PATTERN}", "--", token, count=1
+            ).replace("＝", "=", 1)
             if "=" not in normalized:
                 raise UserFacingError(
                     f"无法识别排序参数：{token}，请使用 --sort=字段。"

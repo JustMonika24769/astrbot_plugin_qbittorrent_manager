@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import inspect
 import sys
 import time
 import types
@@ -178,6 +179,39 @@ class SearchSortTests(unittest.TestCase):
         self.assertEqual(request.keyword, "[VCB-Studio] 漆黑 = 子弹 -- final")
         self.assertEqual(request.sort_by, "seeders")
         self.assertFalse(request.descending)
+
+    def test_search_handler_uses_required_greedy_string(self):
+        parameter = inspect.signature(self.instance.search_torrents).parameters["query"]
+
+        self.assertIs(parameter.annotation, plugin_module.GreedyStr)
+        self.assertIs(parameter.default, inspect.Parameter.empty)
+
+    def test_fullwidth_chinese_options_are_supported(self):
+        request = self.instance._parse_search_request(
+            "－－排序＝做种 －－顺序＝降序 －－ 碧蓝航线"
+        )
+
+        self.assertEqual(request.keyword, "碧蓝航线")
+        self.assertEqual(request.sort_by, "seeders")
+        self.assertTrue(request.descending)
+
+    def test_chinese_em_dash_options_are_supported(self):
+        request = self.instance._parse_search_request(
+            "——排序＝完成 ——顺序＝升序 —— 碧蓝航线"
+        )
+
+        self.assertEqual(request.keyword, "碧蓝航线")
+        self.assertEqual(request.sort_by, "completed")
+        self.assertFalse(request.descending)
+
+    def test_single_unicode_dash_options_are_supported(self):
+        request = self.instance._parse_search_request(
+            "—排序＝时间 —顺序＝降序 — 碧蓝航线"
+        )
+
+        self.assertEqual(request.keyword, "碧蓝航线")
+        self.assertEqual(request.sort_by, "time")
+        self.assertTrue(request.descending)
 
     def test_unknown_sort_field_is_rejected(self):
         with self.assertRaisesRegex(plugin_module.UserFacingError, "不支持的排序字段"):
