@@ -109,6 +109,7 @@ def make_results(count):
             completed="1",
             detail_url=f"https://example.com/details.php?id={index}",
             download_url=f"https://example.com/download.php?id={index}",
+            added_at=f"2026-01-{index:02d} 12:00:00",
         )
         for index in range(1, count + 1)
     ]
@@ -121,7 +122,7 @@ class ParserTests(unittest.TestCase):
           <table><tr>
             <td>动漫</td>
             <td><table class="torrentname"><tr><td>
-              <a title="测试种子" href="details.php?id=1">测试种子</a><br>正确简介
+              <a title="测试种子 2030-12-31" href="details.php?id=1">测试种子 2030-12-31</a><br>正确简介
               <a href="download.php?id=1">下载</a>
             </td></tr></table></td>
             <td>0</td><td>2026-01-01</td><td>1.5 GiB</td>
@@ -136,12 +137,76 @@ class ParserTests(unittest.TestCase):
         )
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].title, "测试种子")
+        self.assertEqual(results[0].title, "测试种子 2030-12-31")
         self.assertEqual(results[0].subtitle, "正确简介 下载")
         self.assertEqual(
             (results[0].seeders, results[0].leechers, results[0].completed),
             ("4", "0", "10"),
         )
+        self.assertEqual(results[0].added_at, "2026-01-01")
+
+
+class SearchSortTests(unittest.TestCase):
+    def setUp(self):
+        self.instance = make_plugin({})
+
+    def test_legacy_search_treats_entire_query_as_keyword(self):
+        request = self.instance._parse_search_request(
+            "[VCB-Studio] title --sort=seeders"
+        )
+
+        self.assertEqual(request.keyword, "[VCB-Studio] title --sort=seeders")
+        self.assertIsNone(request.sort_by)
+
+    def test_standalone_dashes_inside_legacy_keyword_are_not_options(self):
+        request = self.instance._parse_search_request("Movie -- Director's Cut")
+
+        self.assertEqual(request.keyword, "Movie -- Director's Cut")
+        self.assertIsNone(request.sort_by)
+
+    def test_option_like_keyword_can_be_escaped(self):
+        request = self.instance._parse_search_request("-- --sort=seeders special title")
+
+        self.assertEqual(request.keyword, "--sort=seeders special title")
+        self.assertIsNone(request.sort_by)
+
+    def test_options_are_separated_from_keyword(self):
+        request = self.instance._parse_search_request(
+            "--排序=做种 --顺序=升序 -- [VCB-Studio] 漆黑 = 子弹 -- final"
+        )
+
+        self.assertEqual(request.keyword, "[VCB-Studio] 漆黑 = 子弹 -- final")
+        self.assertEqual(request.sort_by, "seeders")
+        self.assertFalse(request.descending)
+
+    def test_unknown_sort_field_is_rejected(self):
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "不支持的排序字段"):
+            self.instance._parse_search_request("--sort=热度 -- 关键词")
+
+    def test_sort_query_replaces_existing_provider_order(self):
+        url = self.instance._apply_search_sort(
+            "https://pt.example/torrents.php?search=test&sort=4&type=asc",
+            "seeders",
+            True,
+        )
+
+        self.assertIn("search=test", url)
+        self.assertIn("sort=7", url)
+        self.assertIn("type=desc", url)
+        self.assertEqual(url.count("sort="), 1)
+
+    def test_numeric_results_are_sorted_and_reindexed(self):
+        results = make_results(3)
+        results[0].seeders = "2"
+        results[1].seeders = "10"
+        results[2].seeders = "?"
+
+        sorted_results = self.instance._sort_results(results, "seeders", True)
+
+        self.assertEqual(
+            [result.title for result in sorted_results], ["种子 2", "种子 1", "种子 3"]
+        )
+        self.assertEqual([result.index for result in sorted_results], [1, 2, 3])
 
 
 class UserConfigTests(unittest.IsolatedAsyncioTestCase):

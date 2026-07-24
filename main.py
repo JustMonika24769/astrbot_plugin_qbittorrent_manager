@@ -3,10 +3,18 @@ import html
 import mimetypes
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote, urljoin, urlparse
+from urllib.parse import (
+    parse_qsl,
+    quote,
+    unquote,
+    urlencode,
+    urljoin,
+    urlparse,
+    urlunparse,
+)
 
 import httpx
 from astrbot.api import logger
@@ -25,7 +33,48 @@ CARD_TEMPLATE = PLUGIN_DIR / "templates" / "torrent_results.html"
 DEFAULT_RENDER_WIDTH = 900
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.3.0"
+
+SORT_FIELD_ALIASES = {
+    "time": "time",
+    "date": "time",
+    "时间": "time",
+    "日期": "time",
+    "seeders": "seeders",
+    "seeder": "seeders",
+    "做种": "seeders",
+    "做种数": "seeders",
+    "leechers": "leechers",
+    "leecher": "leechers",
+    "下载": "leechers",
+    "下载数": "leechers",
+    "completed": "completed",
+    "completion": "completed",
+    "完成": "completed",
+    "完成数": "completed",
+    "size": "size",
+    "大小": "size",
+    "title": "title",
+    "标题": "title",
+}
+SORT_ORDER_ALIASES = {
+    "desc": True,
+    "descending": True,
+    "降序": True,
+    "倒序": True,
+    "asc": False,
+    "ascending": False,
+    "升序": False,
+    "正序": False,
+}
+NEXUSPHP_SORT_CODES = {
+    "title": "1",
+    "time": "4",
+    "size": "5",
+    "completed": "6",
+    "seeders": "7",
+    "leechers": "8",
+}
 
 
 @dataclass(frozen=True)
@@ -115,6 +164,14 @@ class TorrentResult:
     completed: str
     detail_url: str
     download_url: str
+    added_at: str = "未知"
+
+
+@dataclass(frozen=True)
+class SearchRequest:
+    keyword: str
+    sort_by: str | None = None
+    descending: bool = True
 
 
 @dataclass
@@ -144,15 +201,17 @@ class QBittorrentManagerPlugin(Star):
         self._config_lock = asyncio.Lock()
 
     @filter.command("种子")
-    async def search_torrents(self, event: AstrMessageEvent, keyword: str = ""):
+    async def search_torrents(
+        self, event: AstrMessageEvent, query: GreedyStr = GreedyStr("")
+    ):
         try:
             self._ensure_user_access(event)
         except UserFacingError as error:
             yield event.plain_result(str(error))
             return
 
-        keyword = keyword.strip()
-        if not keyword:
+        query = str(query).strip()
+        if not query:
             yield event.plain_result(self._help_text())
             return
 
@@ -163,8 +222,14 @@ class QBittorrentManagerPlugin(Star):
             return
 
         try:
+            request = self._parse_search_request(query)
             user_config = self._user_config(event)
-            results = await self._search(keyword, user_config)
+            results = await self._search(
+                request.keyword,
+                user_config,
+                request.sort_by,
+                request.descending,
+            )
         except UserFacingError as error:
             yield event.plain_result(str(error))
             return
@@ -174,16 +239,16 @@ class QBittorrentManagerPlugin(Star):
             return
 
         if not results:
-            yield event.plain_result(f"没有找到与「{keyword}」相关的种子。")
+            yield event.plain_result(f"没有找到与「{request.keyword}」相关的种子。")
             return
 
         self._remember_results(event, results, user_config)
-        image_url = await self._render_results(keyword, results, user_config)
+        image_url = await self._render_results(request.keyword, results, user_config)
         if image_url:
             yield event.image_result(image_url)
             return
 
-        yield event.plain_result(self._format_plain_results(keyword, results))
+        yield event.plain_result(self._format_plain_results(request.keyword, results))
 
     @filter.command("种子下载")
     async def download_torrent(self, event: AstrMessageEvent, selection: GreedyStr):
@@ -387,19 +452,26 @@ class QBittorrentManagerPlugin(Star):
         yield event.plain_result(self._user_config_help_text())
 
     async def _search(
-        self, keyword: str, user_config: dict[str, Any]
+        self,
+        keyword: str,
+        user_config: dict[str, Any],
+        sort_by: str | None = None,
+        descending: bool = True,
     ) -> list[TorrentResult]:
         provider = self._provider_config(user_config)
         base_url = provider["base_url"].rstrip("/") + "/"
         search_path = provider["search_path"]
         limit = self._int_config("max_results", 10, 1, 30, user_config)
         search_url = urljoin(base_url, search_path.format(keyword=quote(keyword)))
+        if sort_by:
+            search_url = self._apply_search_sort(search_url, sort_by, descending)
 
         async with self._http_client(provider, user_config) as client:
             response = await client.get(search_url)
             self._raise_for_response(response, "搜索接口请求失败")
 
-        return self._parse_nexusphp_results(response.text, base_url, limit)
+        results = self._parse_nexusphp_results(response.text, base_url, limit)
+        return self._sort_results(results, sort_by, descending)
 
     def _parse_nexusphp_results(
         self,
@@ -441,6 +513,7 @@ class QBittorrentManagerPlugin(Star):
             size = self._extract_size(row_text)
             stats = self._extract_stats(row, numbers)
             subtitle = self._extract_subtitle(cells, title)
+            added_at = self._extract_added_at(cells)
 
             results.append(
                 TorrentResult(
@@ -455,6 +528,7 @@ class QBittorrentManagerPlugin(Star):
                     if detail_link
                     else "",
                     download_url=download_url,
+                    added_at=added_at,
                 )
             )
             if len(results) >= limit:
@@ -712,6 +786,7 @@ class QBittorrentManagerPlugin(Star):
                 <p>{html.escape(result.subtitle or "暂无简介")}</p>
                 <div class="meta">
                   <span>大小 {html.escape(result.size)}</span>
+                  <span>时间 {html.escape(result.added_at)}</span>
                   <span>做种 {html.escape(result.seeders)}</span>
                   <span>下载 {html.escape(result.leechers)}</span>
                   <span>完成 {html.escape(result.completed)}</span>
@@ -1206,6 +1281,150 @@ class QBittorrentManagerPlugin(Star):
         return match.group(1) if match else "未知"
 
     @staticmethod
+    def _extract_added_at(cells: list[str]) -> str:
+        pattern = re.compile(
+            r"^(\d{4}[-/]\d{1,2}[-/]\d{1,2})"
+            r"(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?$"
+        )
+        for cell in cells:
+            match = pattern.fullmatch(cell.strip())
+            if match:
+                date = match.group(1).replace("/", "-")
+                return f"{date} {match.group(2)}" if match.group(2) else date
+        return "未知"
+
+    @staticmethod
+    def _parse_search_request(query: str) -> SearchRequest:
+        escaped_keyword = re.match(r"^--(?:\s+|$)", query)
+        if escaped_keyword:
+            keyword = query[escaped_keyword.end() :].strip()
+            if not keyword:
+                raise UserFacingError("缺少搜索关键词。")
+            return SearchRequest(keyword=keyword)
+
+        delimiter = re.search(r"(?:^|\s)--(?:\s|$)", query)
+        starts_with_option = re.match(
+            r"^--(?:sort|order|排序|顺序)[=＝]", query, re.IGNORECASE
+        )
+        if not delimiter or not starts_with_option:
+            return SearchRequest(keyword=query.strip())
+
+        options_text = query[: delimiter.start()].strip()
+        keyword = query[delimiter.end() :].strip()
+        if not keyword:
+            raise UserFacingError("排序参数后缺少搜索关键词。")
+
+        sort_by: str | None = None
+        descending = True
+        order_was_set = False
+        for token in options_text.split():
+            normalized = token.replace("＝", "=", 1)
+            if "=" not in normalized:
+                raise UserFacingError(
+                    f"无法识别排序参数：{token}，请使用 --sort=字段。"
+                )
+            option, value = normalized.split("=", 1)
+            option = option.lower()
+            value = value.strip().lower()
+            if option in {"--sort", "--排序"}:
+                if sort_by is not None:
+                    raise UserFacingError("请勿重复设置排序字段。")
+                sort_by = SORT_FIELD_ALIASES.get(value)
+                if not sort_by:
+                    raise UserFacingError(
+                        "不支持的排序字段，可选：时间、做种、下载、完成、大小、标题。"
+                    )
+            elif option in {"--order", "--顺序"}:
+                if order_was_set:
+                    raise UserFacingError("请勿重复设置排序顺序。")
+                order_was_set = True
+                if value not in SORT_ORDER_ALIASES:
+                    raise UserFacingError("不支持的排序顺序，请使用升序或降序。")
+                descending = SORT_ORDER_ALIASES[value]
+            else:
+                raise UserFacingError(f"无法识别排序参数：{option}。")
+
+        if order_was_set and sort_by is None:
+            raise UserFacingError("设置排序顺序时必须同时设置排序字段。")
+        return SearchRequest(keyword, sort_by, descending)
+
+    @staticmethod
+    def _apply_search_sort(url: str, sort_by: str, descending: bool) -> str:
+        parsed = urlparse(url)
+        query = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in {"sort", "type"}
+        ]
+        query.extend(
+            (
+                ("sort", NEXUSPHP_SORT_CODES[sort_by]),
+                ("type", "desc" if descending else "asc"),
+            )
+        )
+        return urlunparse(parsed._replace(query=urlencode(query)))
+
+    @classmethod
+    def _sort_results(
+        cls,
+        results: list[TorrentResult],
+        sort_by: str | None,
+        descending: bool,
+    ) -> list[TorrentResult]:
+        if not sort_by:
+            return results
+
+        known: list[tuple[Any, TorrentResult]] = []
+        unknown: list[TorrentResult] = []
+        for result in results:
+            value = cls._sort_value(result, sort_by)
+            if value is None:
+                unknown.append(result)
+            else:
+                known.append((value, result))
+        known.sort(key=lambda item: item[0], reverse=descending)
+        ordered = [result for _, result in known] + unknown
+        return [replace(result, index=index) for index, result in enumerate(ordered, 1)]
+
+    @staticmethod
+    def _sort_value(result: TorrentResult, sort_by: str) -> Any | None:
+        if sort_by == "title":
+            return result.title.casefold()
+        if sort_by == "time":
+            match = re.search(
+                r"(\d{4})-(\d{1,2})-(\d{1,2})"
+                r"(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?",
+                result.added_at,
+            )
+            if not match:
+                return None
+            parts = [int(value or 0) for value in match.groups()]
+            return tuple(parts)
+        if sort_by == "size":
+            match = re.search(
+                r"(\d+(?:\.\d+)?)\s*(TiB|GiB|MiB|KiB|TB|GB|MB|KB)",
+                result.size,
+                re.I,
+            )
+            if not match:
+                return None
+            powers = {
+                "KIB": 1,
+                "KB": 1,
+                "MIB": 2,
+                "MB": 2,
+                "GIB": 3,
+                "GB": 3,
+                "TIB": 4,
+                "TB": 4,
+            }
+            return float(match.group(1)) * 1024 ** powers[match.group(2).upper()]
+
+        value = getattr(result, sort_by, "")
+        digits = re.sub(r"[^\d]", "", value)
+        return int(digits) if digits else None
+
+    @staticmethod
     def _extract_stats(row: Any, numbers: list[str]) -> tuple[str, str, str]:
         classes = ("seeders", "leechers", "snatched", "completed")
         by_class: list[str] = []
@@ -1297,7 +1516,9 @@ class QBittorrentManagerPlugin(Star):
         for result in results:
             lines.append(
                 f"{result.index}. {result.title}\n"
-                f"   大小：{result.size} 做种：{result.seeders} 下载：{result.leechers}"
+                f"   时间：{result.added_at} 大小：{result.size} "
+                f"做种：{result.seeders} 下载：{result.leechers} "
+                f"完成：{result.completed}"
             )
         lines.append("发送 /种子下载 序号... 批量添加到下载客户端。")
         return "\n".join(lines)
@@ -1307,9 +1528,10 @@ class QBittorrentManagerPlugin(Star):
         return (
             "种子下载助手：\n"
             "1. /种子 关键词 - 搜索 PT 站种子\n"
-            "2. /种子下载 序号... - 批量添加所选种子到下载客户端\n"
-            "3. /直接下载 磁链或种子链接 - 直接添加下载任务\n"
-            "4. /种子配置 帮助 - 配置自己的 PT 与下载客户端\n"
+            "2. /种子 --sort=做种 --order=降序 -- 关键词 - 排序搜索\n"
+            "3. /种子下载 序号... - 批量添加所选种子到下载客户端\n"
+            "4. /直接下载 磁链或种子链接 - 直接添加下载任务\n"
+            "5. /种子配置 帮助 - 配置自己的 PT 与下载客户端\n"
             "每位用户按 QQ 号使用独立配置。"
         )
 
