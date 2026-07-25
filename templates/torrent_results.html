@@ -63,6 +63,9 @@
       border-radius: 16px;
       background: #ffffff;
     }
+    .item.has-status {
+      height: 136px;
+    }
     .item + .item {
       margin-top: 10px;
     }
@@ -112,6 +115,58 @@
       color: #334155;
       font-size: 12px;
       background: #f1f5f9;
+    }
+    .torrent-status {
+      display: flex;
+      height: 18px;
+      align-items: center;
+      gap: 9px;
+      margin: -3px 0 7px;
+    }
+    .status-label {
+      flex: 0 0 34px;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .progress-track {
+      height: 7px;
+      min-width: 80px;
+      overflow: hidden;
+      flex: 1;
+      border: 1px solid #cbd5e1;
+      border-radius: 2px;
+      background: #ffffff;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #cbd5e1;
+    }
+    .progress-value {
+      flex: 0 0 38px;
+      color: #64748b;
+      font-size: 11px;
+      text-align: right;
+    }
+    .torrent-status.downloading .progress-track {
+      border-color: #1d8bfd;
+    }
+    .torrent-status.downloading .progress-fill {
+      background: #1e8eff;
+    }
+    .torrent-status.seeding .status-label,
+    .torrent-status.seeding .progress-value {
+      color: #07833a;
+    }
+    .torrent-status.seeding .progress-track {
+      border-color: #009900;
+    }
+    .torrent-status.seeding .progress-fill {
+      background: #00bf00;
+    }
+    .torrent-status.completed .progress-fill,
+    .torrent-status.inactive .progress-fill {
+      background: #e2e8f0;
     }
     footer {
       height: 60px;

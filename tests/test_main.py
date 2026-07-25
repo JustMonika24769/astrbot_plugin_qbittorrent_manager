@@ -145,6 +145,104 @@ class ParserTests(unittest.TestCase):
             ("4", "0", "10"),
         )
         self.assertEqual(results[0].added_at, "2026-01-01")
+        self.assertEqual(results[0].status, "")
+        self.assertIsNone(results[0].progress)
+
+    def test_extracts_seeding_status_and_progress(self):
+        html_text = """
+        <table><tr>
+          <td>动漫</td>
+          <td><table class="torrentname">
+            <tr><td><a title="测试种子" href="details.php?id=2">测试种子</a>
+              <a href="download.php?id=2">下载</a></td></tr>
+            <tr><td><img src="s_up.gif"></td><td>
+              <div class="probar_a2" title="已下载，正在做种">
+                <div class="probar_b2" style="width:100%"></div>
+              </div>
+            </td></tr>
+          </table></td>
+          <td>0</td><td>2026-07-25 12:00:00</td><td>2 GiB</td>
+          <td>8</td><td>0</td><td>20</td><td>tester</td>
+        </tr></table>
+        """
+        instance = make_plugin({})
+
+        results = instance._parse_nexusphp_results(
+            html_text, "https://example.com/", 10
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "做种")
+        self.assertEqual(results[0].progress, 100.0)
+        self.assertEqual(results[0].status_kind, "seeding")
+
+    def test_extracts_downloading_status_and_decimal_progress(self):
+        html_text = """
+        <table><tr>
+          <td>电影</td>
+          <td><table class="torrentname">
+            <tr><td><a title="下载中的种子" href="details.php?id=3">下载中的种子</a>
+              <a href="download.php?id=3">下载</a></td></tr>
+            <tr><td></td><td><div class="probar_a1" title="正在下载">
+              <div class="probar_b1" style="width:42.5%"></div>
+            </div></td></tr>
+          </table></td>
+          <td>0</td><td>2026-07-25</td><td>3 GiB</td>
+          <td>5</td><td>1</td><td>9</td><td>tester</td>
+        </tr></table>
+        """
+        instance = make_plugin({})
+
+        result = instance._parse_nexusphp_results(
+            html_text, "https://example.com/", 10
+        )[0]
+
+        self.assertEqual(result.status, "下载")
+        self.assertEqual(result.progress, 42.5)
+        self.assertEqual(result.status_kind, "downloading")
+
+    def test_inactive_seeding_text_is_not_treated_as_active(self):
+        instance = make_plugin({})
+        status, kind = instance._normalize_torrent_status(
+            "已下载，停止做种", "probar_a3"
+        )
+
+        self.assertEqual(status, "暂停")
+        self.assertEqual(kind, "inactive")
+
+    def test_missing_progress_is_not_rendered_as_zero_percent(self):
+        instance = make_plugin({})
+        result = make_results(1)[0]
+        result.status = "暂停"
+        result.status_kind = "inactive"
+
+        rendered = instance._status_html(result)
+
+        self.assertIn('class="status-label">暂停</span>', rendered)
+        self.assertIn('class="progress-value">—</span>', rendered)
+        self.assertNotIn("0%</span>", rendered)
+
+    def test_unrelated_number_in_status_title_is_not_progress(self):
+        soup = plugin_module.BeautifulSoup(
+            '<div class="probar_a3" title="已下载 2 天，停止做种"></div>',
+            "html.parser",
+        )
+
+        progress = make_plugin({})._extract_progress_percent(soup.div)
+
+        self.assertIsNone(progress)
+
+    def test_render_height_includes_each_status_row_without_clipping(self):
+        instance = make_plugin({})
+        results = make_results(30)
+        for result in results:
+            result.status = "做种"
+            result.progress = 100.0
+
+        width, height = instance._render_dimensions(results, {"render_width": 900})
+
+        self.assertEqual(width, 900)
+        self.assertEqual(height, 4594)
 
 
 class SearchSortTests(unittest.TestCase):

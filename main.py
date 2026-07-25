@@ -31,9 +31,11 @@ except ImportError:  # pragma: no cover - handled at runtime for friendly errors
 PLUGIN_DIR = Path(__file__).resolve().parent
 CARD_TEMPLATE = PLUGIN_DIR / "templates" / "torrent_results.html"
 DEFAULT_RENDER_WIDTH = 900
+MAX_RENDER_HEIGHT = 5000
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
-PLUGIN_VERSION = "1.3.1"
+RENDER_STATUS_HEIGHT = 38
+PLUGIN_VERSION = "1.4.0"
 
 SORT_FIELD_ALIASES = {
     "time": "time",
@@ -166,6 +168,9 @@ class TorrentResult:
     detail_url: str
     download_url: str
     added_at: str = "未知"
+    status: str = ""
+    progress: float | None = None
+    status_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -513,6 +518,7 @@ class QBittorrentManagerPlugin(Star):
             stats = self._extract_stats(row, numbers)
             subtitle = self._extract_subtitle(cells, title)
             added_at = self._extract_added_at(cells)
+            status, progress, status_kind = self._extract_torrent_status(row)
 
             results.append(
                 TorrentResult(
@@ -528,6 +534,9 @@ class QBittorrentManagerPlugin(Star):
                     else "",
                     download_url=download_url,
                     added_at=added_at,
+                    status=status,
+                    progress=progress,
+                    status_kind=status_kind,
                 )
             )
             if len(results) >= limit:
@@ -775,14 +784,15 @@ class QBittorrentManagerPlugin(Star):
         if not CARD_TEMPLATE.exists():
             return None
 
-        render_width, render_height = self._render_dimensions(len(results), user_config)
+        render_width, render_height = self._render_dimensions(results, user_config)
         rows = "\n".join(
             f"""
-            <article class="item">
+            <article class="item{" has-status" if result.status else ""}">
               <div class="rank">{result.index}</div>
               <div class="content">
                 <h2>{html.escape(result.title)}</h2>
                 <p>{html.escape(result.subtitle or "暂无简介")}</p>
+                {self._status_html(result)}
                 <div class="meta">
                   <span>大小 {html.escape(result.size)}</span>
                   <span>时间 {html.escape(result.added_at)}</span>
@@ -911,13 +921,16 @@ class QBittorrentManagerPlugin(Star):
         )
 
     def _render_dimensions(
-        self, result_count: int, user_config: dict[str, Any]
+        self, results: list[TorrentResult], user_config: dict[str, Any]
     ) -> tuple[int, int]:
         width = self._int_config(
             "render_width", DEFAULT_RENDER_WIDTH, 640, 1400, user_config
         )
+        result_count = len(results)
+        status_count = sum(bool(result.status) for result in results)
         height = RENDER_BASE_HEIGHT + max(result_count, 1) * RENDER_ITEM_HEIGHT
-        height = min(max(height, 360), 2000)
+        height += status_count * RENDER_STATUS_HEIGHT
+        height = min(max(height, 360), MAX_RENDER_HEIGHT)
         return width, height
 
     def _remember_results(
@@ -1292,6 +1305,112 @@ class QBittorrentManagerPlugin(Star):
                 return f"{date} {match.group(2)}" if match.group(2) else date
         return "未知"
 
+    @classmethod
+    def _extract_torrent_status(cls, row: Any) -> tuple[str, float | None, str]:
+        torrent_table = row.find("table", class_=re.compile(r"\btorrentname\b", re.I))
+        if not torrent_table:
+            return "", None, ""
+
+        progress_bar = torrent_table.find(
+            "div", class_=re.compile(r"\bprobar_a[123]\b", re.I)
+        )
+        if not progress_bar:
+            return "", None, ""
+
+        classes = [str(value).lower() for value in progress_bar.get("class", [])]
+        progress_class = next(
+            (value for value in classes if re.fullmatch(r"probar_a[123]", value)),
+            "",
+        )
+        detail = str(progress_bar.get("title") or "").strip()
+        status, status_kind = cls._normalize_torrent_status(detail, progress_class)
+        progress = cls._extract_progress_percent(progress_bar)
+        return status, progress, status_kind
+
+    @staticmethod
+    def _normalize_torrent_status(detail: str, progress_class: str) -> tuple[str, str]:
+        if any(word in detail for word in ("暂停", "停止", "未活动", "未做种")):
+            return "暂停", "inactive"
+        if any(word in detail for word in ("正在做种", "做种中")):
+            return "做种", "seeding"
+        if any(word in detail for word in ("正在下载", "下载中")):
+            return "下载", "downloading"
+        if any(word in detail for word in ("完成", "已下载", "下载完")):
+            return "完成", "completed"
+        if "做种" in detail:
+            return "做种", "seeding"
+
+        defaults = {
+            "probar_a1": ("下载", "downloading"),
+            "probar_a2": ("做种", "seeding"),
+            "probar_a3": ("完成", "completed"),
+        }
+        if progress_class in defaults:
+            return defaults[progress_class]
+        return (detail[:20], "inactive") if detail else ("", "")
+
+    @staticmethod
+    def _extract_progress_percent(progress_bar: Any) -> float | None:
+        inner_bar = progress_bar.find(
+            "div", class_=re.compile(r"\bprobar_b[123]\b", re.I)
+        )
+        style_candidates = [
+            inner_bar.get("style") if inner_bar else "",
+            progress_bar.get("style") or "",
+        ]
+        for candidate in style_candidates:
+            match = re.search(r"width\s*:\s*(\d+(?:\.\d+)?)\s*%", str(candidate))
+            if match:
+                return min(max(float(match.group(1)), 0.0), 100.0)
+
+        value_candidates = [
+            progress_bar.get("aria-valuenow") or "",
+            progress_bar.get("data-progress") or "",
+        ]
+        for candidate in value_candidates:
+            match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*%?\s*", str(candidate))
+            if match:
+                return min(max(float(match.group(1)), 0.0), 100.0)
+
+        title_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*%", str(progress_bar.get("title") or "")
+        )
+        if title_match:
+            return min(max(float(title_match.group(1)), 0.0), 100.0)
+        return None
+
+    @staticmethod
+    def _status_html(result: TorrentResult) -> str:
+        if not result.status:
+            return ""
+
+        progress = 0.0 if result.progress is None else result.progress
+        progress_text = (
+            "—"
+            if result.progress is None
+            else f"{progress:.1f}".rstrip("0").rstrip(".") + "%"
+        )
+        kind = (
+            result.status_kind
+            if result.status_kind
+            in {
+                "downloading",
+                "seeding",
+                "completed",
+                "inactive",
+            }
+            else "inactive"
+        )
+        return (
+            f'<div class="torrent-status {kind}">'
+            f'<span class="status-label">{html.escape(result.status)}</span>'
+            '<div class="progress-track">'
+            f'<div class="progress-fill" style="width:{progress}%"></div>'
+            "</div>"
+            f'<span class="progress-value">{progress_text}</span>'
+            "</div>"
+        )
+
     @staticmethod
     def _parse_search_request(query: str) -> SearchRequest:
         escaped_keyword = re.match(rf"^{OPTION_PREFIX_PATTERN}(?:\s+|$)", query)
@@ -1517,12 +1636,20 @@ class QBittorrentManagerPlugin(Star):
     def _format_plain_results(self, keyword: str, results: list[TorrentResult]) -> str:
         lines = [f"「{keyword}」搜索结果："]
         for result in results:
-            lines.append(
+            item = (
                 f"{result.index}. {result.title}\n"
                 f"   时间：{result.added_at} 大小：{result.size} "
                 f"做种：{result.seeders} 下载：{result.leechers} "
                 f"完成：{result.completed}"
             )
+            if result.status:
+                progress = (
+                    "未知"
+                    if result.progress is None
+                    else (f"{result.progress:.1f}".rstrip("0").rstrip(".") + "%")
+                )
+                item += f"\n   当前状态：{result.status}，进度：{progress}"
+            lines.append(item)
         lines.append("发送 /种子下载 序号... 批量添加到下载客户端。")
         return "\n".join(lines)
 
