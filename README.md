@@ -20,7 +20,7 @@ _✨ 按 QQ 用户独立配置 PT 站，并推送到 qBittorrent / uTorrent 下�
 
 ## 🖼️ 效果预览
 
-![搜索结果预览](assets/preview.png)
+![搜索结果预览](assets/preview.jpeg)
 
 ## ✨ 功能特性
 
