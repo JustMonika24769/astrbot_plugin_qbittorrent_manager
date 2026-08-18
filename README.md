@@ -257,6 +257,7 @@ HTTP(S) 链接会先由插件下载并校验为 `.torrent` 文件，再上传到
 - `qb_url` 应填写 AstrBot 所在环境可访问的地址。
 - `qb_save_path` 和 `qb_category` 留空时，qBittorrent 会使用自身默认下载规则。
 - 磁链通过 qBittorrent Web API 的 URL 添加能力处理。
+- WebAPI 兼容 qBittorrent 5.2 的 `204 No Content`、任务计数 JSON 和 `202 Accepted` 响应，同时保留对旧版本 `Ok.` 响应的支持，无需额外配置。
 
 ### uTorrent
 

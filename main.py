@@ -35,7 +35,7 @@ MAX_RENDER_HEIGHT = 5000
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
 RENDER_STATUS_HEIGHT = 38
-PLUGIN_VERSION = "1.4.0"
+PLUGIN_VERSION = "1.4.1"
 
 SORT_FIELD_ALIASES = {
     "time": "time",
@@ -661,11 +661,9 @@ class QBittorrentManagerPlugin(Star):
             add_response = await qb_client.post(
                 "/api/v2/torrents/add", data=data, files=files
             )
-            self._raise_for_response(add_response, "qBittorrent 添加任务失败")
-            if add_response.text.strip().lower() not in {"ok.", "ok"}:
-                raise UserFacingError(
-                    f"qBittorrent 返回异常：{add_response.text[:120]}"
-                )
+            self._check_qbittorrent_add_response(
+                add_response, "qBittorrent 添加任务失败"
+            )
 
     async def _add_uri_to_qbittorrent(self, uri: str, user_config: dict[str, Any]):
         qb_config = self._qbittorrent_config(user_config)
@@ -691,11 +689,9 @@ class QBittorrentManagerPlugin(Star):
                 data["category"] = category
 
             add_response = await qb_client.post("/api/v2/torrents/add", data=data)
-            self._raise_for_response(add_response, "qBittorrent 添加链接失败")
-            if add_response.text.strip().lower() not in {"ok.", "ok"}:
-                raise UserFacingError(
-                    f"qBittorrent 返回异常：{add_response.text[:120]}"
-                )
+            self._check_qbittorrent_add_response(
+                add_response, "qBittorrent 添加链接失败"
+            )
 
     async def _add_to_utorrent(
         self, torrent_file: TorrentFile, user_config: dict[str, Any]
@@ -761,9 +757,58 @@ class QBittorrentManagerPlugin(Star):
                 "password": qb_config["password"],
             },
         )
-        self._raise_for_response(login_response, "qBittorrent 登录失败")
-        if login_response.text.strip().lower() != "ok.":
+
+        if login_response.status_code == 401:
             raise UserFacingError("qBittorrent 登录失败，请检查用户名和密码。")
+        if login_response.status_code == 403:
+            raise UserFacingError(
+                "qBittorrent 登录被拒绝，可能因失败次数过多导致 IP 被临时封禁。"
+            )
+        self._raise_for_response(login_response, "qBittorrent 登录失败")
+
+        response_body = login_response.text.strip().lower()
+        if login_response.status_code == 204 or response_body in {"ok", "ok."}:
+            return
+        if response_body in {"fails", "fails."}:
+            raise UserFacingError("qBittorrent 登录失败，请检查用户名和密码。")
+        raise UserFacingError(
+            f"qBittorrent 返回无法识别的登录响应（HTTP {login_response.status_code}）。"
+        )
+
+    def _check_qbittorrent_add_response(self, response: httpx.Response, prefix: str):
+        if response.status_code == 409:
+            raise UserFacingError(
+                f"{prefix}：任务未被接受，种子可能已存在或被客户端拒绝。"
+            )
+        self._raise_for_response(response, prefix)
+
+        response_body = response.text.strip()
+        if response.status_code == 204 or not response_body:
+            return
+        if response_body.lower() in {"ok", "ok."}:
+            return
+
+        try:
+            result = response.json()
+        except ValueError:
+            result = None
+        if isinstance(result, dict) and any(
+            key in result for key in ("success_count", "pending_count", "failure_count")
+        ):
+            success_count = self._response_count(result, "success_count")
+            pending_count = self._response_count(result, "pending_count")
+            if success_count + pending_count > 0:
+                return
+            raise UserFacingError(f"{prefix}：qBittorrent 未接受任务。")
+
+        raise UserFacingError(f"qBittorrent 返回异常：{response_body[:120]}")
+
+    @staticmethod
+    def _response_count(result: dict[str, Any], key: str) -> int:
+        try:
+            return max(0, int(result.get(key, 0)))
+        except (TypeError, ValueError):
+            return 0
 
     async def _get_utorrent_token(self, ut_client: httpx.AsyncClient) -> str:
         token_response = await ut_client.get("/gui/token.html")

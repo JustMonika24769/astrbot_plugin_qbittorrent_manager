@@ -529,5 +529,85 @@ class BatchDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2. 种子 2：客户端拒绝任务", response)
 
 
+class QBittorrentWebAPITests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.instance = make_plugin({})
+        self.config = {"username": "tester", "password": "secret"}
+
+    @staticmethod
+    def make_client(status_code, body=""):
+        class FakeClient:
+            async def post(self, _url, data):
+                return plugin_module.httpx.Response(status_code, text=body)
+
+        return FakeClient()
+
+    async def test_accepts_qbittorrent_52_no_content_response(self):
+        client = self.make_client(204)
+
+        await self.instance._login_qbittorrent(client, self.config)
+
+    async def test_accepts_legacy_ok_response(self):
+        client = self.make_client(200, "Ok.")
+
+        await self.instance._login_qbittorrent(client, self.config)
+
+    async def test_legacy_failed_response_reports_invalid_credentials(self):
+        client = self.make_client(200, "Fails.")
+
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "用户名和密码"):
+            await self.instance._login_qbittorrent(client, self.config)
+
+    async def test_unauthorized_response_reports_invalid_credentials(self):
+        client = self.make_client(401)
+
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "用户名和密码"):
+            await self.instance._login_qbittorrent(client, self.config)
+
+    async def test_forbidden_response_mentions_temporary_ban(self):
+        client = self.make_client(403)
+
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "临时封禁"):
+            await self.instance._login_qbittorrent(client, self.config)
+
+    async def test_unrecognized_success_response_is_not_reported_as_bad_password(self):
+        client = self.make_client(200, "Unexpected")
+
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "无法识别"):
+            await self.instance._login_qbittorrent(client, self.config)
+
+    def test_accepts_qbittorrent_52_structured_add_response(self):
+        response = plugin_module.httpx.Response(
+            200,
+            json={
+                "success_count": 1,
+                "pending_count": 0,
+                "failure_count": 0,
+                "added_torrent_ids": ["hash"],
+            },
+        )
+
+        self.instance._check_qbittorrent_add_response(response, "添加失败")
+
+    def test_accepts_qbittorrent_52_pending_add_response(self):
+        response = plugin_module.httpx.Response(
+            202,
+            json={"success_count": 0, "pending_count": 1, "failure_count": 0},
+        )
+
+        self.instance._check_qbittorrent_add_response(response, "添加失败")
+
+    def test_accepts_no_content_add_response(self):
+        response = plugin_module.httpx.Response(204)
+
+        self.instance._check_qbittorrent_add_response(response, "添加失败")
+
+    def test_conflict_add_response_reports_rejected_task(self):
+        response = plugin_module.httpx.Response(409)
+
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "可能已存在"):
+            self.instance._check_qbittorrent_add_response(response, "添加失败")
+
+
 if __name__ == "__main__":
     unittest.main()
