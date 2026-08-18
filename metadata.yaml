@@ -6,6 +6,6 @@ help: |
   /种子下载 序号... - 批量添加到个人下载客户端
   /种子配置 帮助 - 配置个人 PT 与下载客户端
   /种子帮助 - 查看帮助
-version: v1.4.1
+version: v1.6.1
 author: Codex，JustMonika
 repo: https://github.com/JustMonika24769/astrbot_plugin_qbittorrent_manager
