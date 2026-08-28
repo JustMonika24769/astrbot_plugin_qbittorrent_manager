@@ -181,6 +181,7 @@ cython_debug/
 .cursorindexingignore
 
 astrbot_plugin_qbittorrent_manager.zip
+*.zip
 temp.txt
 .agents/
 package.ps1

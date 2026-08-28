@@ -35,7 +35,7 @@ MAX_RENDER_HEIGHT = 5000
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
 RENDER_STATUS_HEIGHT = 38
-PLUGIN_VERSION = "1.6.1"
+PLUGIN_VERSION = "1.7.0-beta.2"
 
 SORT_FIELD_ALIASES = {
     "time": "time",
@@ -77,6 +77,14 @@ NEXUSPHP_SORT_CODES = {
     "seeders": "7",
     "leechers": "8",
 }
+MTEAM_SORT_FIELDS = {
+    "title": "NAME",
+    "time": "CREATED_DATE",
+    "size": "SIZE",
+    "completed": "TIMES_COMPLETED",
+    "seeders": "SEEDERS",
+    "leechers": "LEECHERS",
+}
 OPTION_PREFIX_PATTERN = r"(?:--|[－—–−]{1,2})"
 
 
@@ -90,9 +98,13 @@ class ConfigField:
 
 
 USER_CONFIG_FIELDS = {
+    "provider_type": ConfigField("PT 站点类型"),
     "provider_base_url": ConfigField("PT 站点地址"),
     "provider_search_path": ConfigField("PT 搜索路径"),
     "provider_cookie": ConfigField("PT Cookie", sensitive=True),
+    "mteam_api_token": ConfigField("M-Team API Token", sensitive=True),
+    "mteam_search_path": ConfigField("M-Team API 搜索路径"),
+    "mteam_download_path": ConfigField("M-Team API 下载路径"),
     "download_client": ConfigField("下载客户端"),
     "qb_url": ConfigField("qBittorrent WebUI 地址"),
     "qb_username": ConfigField("qBittorrent 用户名"),
@@ -111,9 +123,13 @@ USER_CONFIG_FIELDS = {
 }
 
 BUILTIN_USER_CONFIG = {
+    "provider_type": "nexusphp",
     "provider_base_url": "https://www.tjupt.org/",
     "provider_search_path": "torrents.php?search={keyword}&incldead=0",
     "provider_cookie": "",
+    "mteam_api_token": "",
+    "mteam_search_path": "/api/torrent/search",
+    "mteam_download_path": "/api/torrent/genDlToken",
     "download_client": "qbittorrent",
     "qb_url": "",
     "qb_username": "",
@@ -132,6 +148,12 @@ BUILTIN_USER_CONFIG = {
 }
 
 CONFIG_KEY_ALIASES = {
+    "站点类型": "provider_type",
+    "provider": "provider_type",
+    "mteam令牌": "mteam_api_token",
+    "mteamtoken": "mteam_api_token",
+    "mteam搜索路径": "mteam_search_path",
+    "mteam下载路径": "mteam_download_path",
     "站点": "provider_base_url",
     "pt站点": "provider_base_url",
     "搜索路径": "provider_search_path",
@@ -463,6 +485,8 @@ class QBittorrentManagerPlugin(Star):
         descending: bool = True,
     ) -> list[TorrentResult]:
         provider = self._provider_config(user_config)
+        if provider["type"] == "mteam":
+            return await self._search_mteam(keyword, user_config, sort_by, descending)
         base_url = provider["base_url"].rstrip("/") + "/"
         search_path = provider["search_path"]
         limit = self._int_config("max_results", 10, 1, 30, user_config)
@@ -476,6 +500,148 @@ class QBittorrentManagerPlugin(Star):
 
         results = self._parse_nexusphp_results(response.text, base_url, limit)
         return self._sort_results(results, sort_by, descending)
+
+    async def _search_mteam(
+        self,
+        keyword: str,
+        user_config: dict[str, Any],
+        sort_by: str | None,
+        descending: bool,
+    ) -> list[TorrentResult]:
+        provider = self._provider_config(user_config)
+        limit = self._int_config("max_results", 10, 1, 30, user_config)
+        form: dict[str, Any] = {
+            "mode": "normal",
+            "keyword": keyword,
+            "pageNumber": 1,
+            "pageSize": limit,
+        }
+        if sort_by:
+            form["sortField"] = MTEAM_SORT_FIELDS.get(sort_by, "CREATED_DATE")
+            form["sortDirection"] = "DESC" if descending else "ASC"
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        token = provider.get("api_token", "")
+        if token:
+            headers["x-api-key"] = token
+        async with httpx.AsyncClient(
+            base_url=provider["base_url"].rstrip("/"),
+            headers=headers,
+            timeout=self._float_config("request_timeout", 20.0, 5.0, 120.0, user_config),
+            follow_redirects=True,
+        ) as client:
+            response = await client.post(provider["search_path"], json=form)
+            self._raise_for_response(response, "M-Team API 搜索失败")
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise UserFacingError("M-Team API 返回不是有效 JSON。") from error
+        self._check_mteam_api_result(payload, "M-Team API 搜索失败")
+        items = self._mteam_items(payload)
+        results: list[TorrentResult] = []
+        for item in items[:limit]:
+            if not isinstance(item, dict):
+                continue
+            torrent_id = self._first_value(item, "id", "torrentId", "torrent_id", "tid")
+            title = str(self._first_value(item, "name", "title", "torrentName") or "").strip()
+            if not title:
+                continue
+            status_data = item.get("status") if isinstance(item.get("status"), dict) else {}
+            detail_url = self._absolute_url(provider["base_url"], self._first_value(item, "detailUrl", "detail_url", "detail", "url"))
+            download_url = self._absolute_url(provider["base_url"], self._first_value(item, "downloadUrl", "download_url", "downloadLink"))
+            if not download_url and torrent_id:
+                download_url = f"mteam:{torrent_id}"
+            results.append(TorrentResult(
+                index=len(results) + 1,
+                title=title,
+                subtitle=str(self._first_value(item, "smallDescr", "subtitle", "description") or "").strip()[:120],
+                size=self._format_mteam_size(self._first_value(item, "size", "sizeFormatted", "fileSize")),
+                seeders=self._mteam_display_value(status_data, item, "seeders", "seeder", "seedCount"),
+                leechers=self._mteam_display_value(status_data, item, "leechers", "leecher", "leechCount"),
+                completed=self._mteam_display_value(status_data, item, "timesCompleted", "completed", "snatched", "completedCount"),
+                detail_url=detail_url,
+                download_url=download_url,
+                added_at=str(self._first_value(item, "addedAt", "createdAt", "createdDate", "publishTime", "time") or "未知"),
+                # M-Team status describes torrent metadata, not a user's client task.
+                status="",
+                progress=None,
+                status_kind="",
+            ))
+        return self._sort_results(results, sort_by, descending)
+
+    @staticmethod
+    def _mteam_items(payload: Any) -> list[Any]:
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+        for key in ("data", "list", "results", "records", "torrents", "normalList", "adultList", "content"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                nested = QBittorrentManagerPlugin._mteam_items(value)
+                if nested:
+                    return nested
+        return []
+
+    @staticmethod
+    def _check_mteam_api_result(payload: Any, prefix: str):
+        if not isinstance(payload, dict):
+            return
+        code = payload.get("code")
+        if code in (None, 0, "0", 200, "200", "SUCCESS", "success"):
+            return
+        message = payload.get("message") or payload.get("msg") or "未知错误"
+        raise UserFacingError(f"{prefix}：{message}")
+
+    @staticmethod
+    def _format_mteam_size(value: Any) -> str:
+        if value in (None, ""):
+            return "未知"
+        text = str(value).strip()
+        if re.search(r"[KMGT]i?B", text, re.I):
+            return text
+        try:
+            size = float(text)
+        except ValueError:
+            return text
+        units = ("B", "KiB", "MiB", "GiB", "TiB")
+        unit = 0
+        while size >= 1024 and unit < len(units) - 1:
+            size /= 1024
+            unit += 1
+        return f"{size:.2f}".rstrip("0").rstrip(".") + f" {units[unit]}"
+
+    @staticmethod
+    def _first_value(item: dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if item.get(key) not in (None, ""):
+                return item[key]
+        return None
+
+    @staticmethod
+    def _mteam_display_value(primary: dict[str, Any], fallback: dict[str, Any], *keys: str) -> str:
+        value = QBittorrentManagerPlugin._first_value(primary, *keys)
+        if value is None:
+            value = QBittorrentManagerPlugin._first_value(fallback, *keys)
+        return "?" if value in (None, "") else str(value)
+
+    @staticmethod
+    def _absolute_url(base_url: str, value: Any) -> str:
+        if not value:
+            return ""
+        return urljoin(base_url.rstrip("/") + "/", str(value))
+
+    @staticmethod
+    def _mteam_progress(item: dict[str, Any]) -> float | None:
+        value = QBittorrentManagerPlugin._first_value(item, "progress", "percent", "completion")
+        try:
+            progress = float(value)
+        except (TypeError, ValueError):
+            return None
+        if progress <= 1:
+            progress *= 100
+        return min(max(progress, 0.0), 100.0)
 
     def _parse_nexusphp_results(
         self,
@@ -581,6 +747,10 @@ class QBittorrentManagerPlugin(Star):
         self, torrent: TorrentResult, user_config: dict[str, Any]
     ) -> TorrentFile:
         provider = self._provider_config(user_config)
+        if provider["type"] == "mteam" and torrent.download_url.startswith("mteam:"):
+            return await self._download_mteam_torrent(
+                torrent.download_url.removeprefix("mteam:"), torrent.title, user_config
+            )
         async with self._http_client(provider, user_config) as pt_client:
             torrent_response = await pt_client.get(torrent.download_url)
             self._raise_for_response(torrent_response, "下载种子文件失败")
@@ -592,6 +762,59 @@ class QBittorrentManagerPlugin(Star):
                 ".torrent", "application/x-bittorrent"
             ),
         )
+
+    async def _download_mteam_torrent(
+        self, torrent_id: str, title: str, user_config: dict[str, Any]
+    ) -> TorrentFile:
+        provider = self._provider_config(user_config)
+        headers = {
+            "Accept": "application/json",
+            "x-api-key": provider["api_token"],
+        }
+        timeout = self._float_config("request_timeout", 20.0, 5.0, 120.0, user_config)
+        async with httpx.AsyncClient(
+            base_url=provider["base_url"].rstrip("/"),
+            headers=headers,
+            timeout=timeout,
+            follow_redirects=True,
+        ) as client:
+            token_response = await client.post(
+                provider["download_path"], params={"id": torrent_id}
+            )
+            self._raise_for_response(token_response, "M-Team API 获取下载链接失败")
+            try:
+                payload = token_response.json()
+            except ValueError as error:
+                raise UserFacingError("M-Team API 下载链接响应不是有效 JSON。") from error
+            self._check_mteam_api_result(payload, "M-Team API 获取下载链接失败")
+            download_url = self._mteam_download_url(payload)
+            if not download_url:
+                raise UserFacingError("M-Team API 未返回种子下载链接。")
+            torrent_response = await client.get(download_url, headers={"Accept": "application/x-bittorrent"})
+            self._raise_for_response(torrent_response, "下载 M-Team 种子文件失败")
+        if not torrent_response.content.lstrip().startswith(b"d"):
+            raise UserFacingError("M-Team 返回的内容不是有效种子文件。")
+        return TorrentFile(
+            filename=self._safe_filename(title),
+            content=torrent_response.content,
+            content_type="application/x-bittorrent",
+        )
+
+    @classmethod
+    def _mteam_download_url(cls, payload: Any) -> str:
+        if isinstance(payload, str):
+            return payload
+        if not isinstance(payload, dict):
+            return ""
+        for key in ("data", "url", "downloadUrl", "download_url"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                return value
+            if isinstance(value, dict):
+                nested = cls._mteam_download_url(value)
+                if nested:
+                    return nested
+        return ""
 
     async def _download_torrent_from_url(
         self, uri: str, user_config: dict[str, Any]
@@ -888,19 +1111,36 @@ class QBittorrentManagerPlugin(Star):
             return None
 
     def _provider_config(self, user_config: dict[str, Any]) -> dict[str, str]:
+        provider_type = str(user_config.get("provider_type") or "nexusphp").strip().lower()
+        if provider_type in {"m-team", "mteam", "m_team", "api"}:
+            provider_type = "mteam"
+        else:
+            provider_type = "nexusphp"
         base_url = (
-            user_config.get("provider_base_url") or "https://www.tjupt.org/"
+            user_config.get("provider_base_url")
+            or ("https://api.m-team.cc" if provider_type == "mteam" else "https://www.tjupt.org/")
         ).strip()
         search_path = (
-            user_config.get("provider_search_path")
-            or "torrents.php?search={keyword}&incldead=0"
+            user_config.get("mteam_search_path" if provider_type == "mteam" else "provider_search_path")
+            or ("/api/torrent/search" if provider_type == "mteam" else "torrents.php?search={keyword}&incldead=0")
         ).strip()
         cookie = (user_config.get("provider_cookie") or "").strip()
+        api_token = (user_config.get("mteam_api_token") or "").strip()
+        download_path = (user_config.get("mteam_download_path") or "/api/torrent/genDlToken").strip()
         if not base_url:
             raise UserFacingError("未配置 PT 站点地址。")
-        if "{keyword}" not in search_path:
+        if provider_type == "nexusphp" and "{keyword}" not in search_path:
             raise UserFacingError("搜索路径必须包含 {keyword} 占位符。")
-        return {"base_url": base_url, "search_path": search_path, "cookie": cookie}
+        if provider_type == "mteam" and not api_token:
+            raise UserFacingError("未配置 M-Team API Token。")
+        return {
+            "type": provider_type,
+            "base_url": base_url,
+            "search_path": search_path,
+            "cookie": cookie,
+            "api_token": api_token,
+            "download_path": download_path,
+        }
 
     def _qbittorrent_config(self, user_config: dict[str, Any]) -> dict[str, str]:
         qb_url = (user_config.get("qb_url") or "").strip().rstrip("/")
@@ -1160,6 +1400,14 @@ class QBittorrentManagerPlugin(Star):
 
         if key == "provider_search_path" and "{keyword}" not in value:
             raise UserFacingError("PT 搜索路径必须包含 {keyword} 占位符。")
+
+        if key == "provider_type":
+            normalized_provider = value.lower().replace("-", "").replace("_", "")
+            if normalized_provider in {"mteam", "api"}:
+                return "mteam"
+            if normalized_provider in {"nexusphp", "nexus"}:
+                return "nexusphp"
+            raise UserFacingError("站点类型只支持 nexusphp 或 mteam。")
 
         if key in {"provider_base_url", "qb_url", "ut_url"}:
             parsed_url = urlparse(value)

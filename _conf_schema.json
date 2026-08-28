@@ -1,4 +1,10 @@
 {
+  "provider_type": {
+    "description": "PT 站点类型，可选 nexusphp 或 mteam。",
+    "type": "string",
+    "hint": "nexusphp / mteam",
+    "default": "nexusphp"
+  },
   "provider_base_url": {
     "description": "PT 站点地址，默认北洋园 PT。",
     "type": "string",
@@ -16,6 +22,24 @@
     "type": "string",
     "hint": "从浏览器开发者工具复制 Cookie 请求头",
     "default": ""
+  },
+  "mteam_api_token": {
+    "description": "M-Team API Token。",
+    "type": "string",
+    "hint": "仅 provider_type=mteam 时使用，敏感信息",
+    "default": ""
+  },
+  "mteam_search_path": {
+    "description": "M-Team API 搜索路径。",
+    "type": "string",
+    "hint": "/api/torrent/search",
+    "default": "/api/torrent/search"
+  },
+  "mteam_download_path": {
+    "description": "M-Team 获取临时下载链接的 API 路径。",
+    "type": "string",
+    "hint": "/api/torrent/genDlToken",
+    "default": "/api/torrent/genDlToken"
   },
   "download_client": {
     "description": "下载客户端类型，可选 qbittorrent 或 utorrent。",
@@ -151,6 +175,12 @@
             "hint": "必须与消息事件中的发送者 QQ 号一致。",
             "default": ""
           },
+          "provider_type": {
+            "description": "PT 站点类型",
+            "type": "string",
+            "options": ["nexusphp", "mteam"],
+            "default": "nexusphp"
+          },
           "provider_base_url": {
             "description": "PT 站点地址",
             "type": "string",
@@ -168,6 +198,25 @@
             "type": "string",
             "hint": "敏感信息，请勿公开。",
             "default": ""
+          },
+          "mteam_api_token": {
+            "description": "M-Team API Token",
+            "type": "string",
+            "hint": "敏感信息",
+            "default": "",
+            "condition": {"provider_type": "mteam"}
+          },
+          "mteam_search_path": {
+            "description": "M-Team API 搜索路径",
+            "type": "string",
+            "default": "/api/torrent/search",
+            "condition": {"provider_type": "mteam"}
+          },
+          "mteam_download_path": {
+            "description": "M-Team 获取下载链接路径",
+            "type": "string",
+            "default": "/api/torrent/genDlToken",
+            "condition": {"provider_type": "mteam"}
           },
           "download_client": {
             "description": "下载客户端",

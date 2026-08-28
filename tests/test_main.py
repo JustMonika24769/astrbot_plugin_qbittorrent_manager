@@ -341,6 +341,105 @@ class SearchSortTests(unittest.TestCase):
         self.assertEqual([result.index for result in sorted_results], [1, 2, 3])
 
 
+class MTeamTests(unittest.TestCase):
+    def setUp(self):
+        self.instance = make_plugin({})
+
+    def test_mteam_provider_requires_token(self):
+        with self.assertRaisesRegex(plugin_module.UserFacingError, "API Token"):
+            self.instance._provider_config({"provider_type": "mteam"})
+
+    def test_mteam_provider_uses_api_defaults(self):
+        provider = self.instance._provider_config(
+            {"provider_type": "mteam", "mteam_api_token": "token"}
+        )
+
+        self.assertEqual(provider["type"], "mteam")
+        self.assertEqual(provider["base_url"], "https://api.m-team.cc")
+        self.assertEqual(provider["search_path"], "/api/torrent/search")
+        self.assertEqual(provider["download_path"], "/api/torrent/genDlToken")
+
+    def test_mteam_result_payload_is_parsed(self):
+        payload = {
+            "code": 0,
+            "data": {
+                "data": [
+                    {
+                        "id": 42,
+                        "name": "M-Team 测试种子",
+                        "size": 1073741824,
+                        "seeders": 8,
+                        "leechers": 2,
+                        "timesCompleted": 10,
+                        "createdDate": "2026-08-27 12:00:00",
+                    }
+                ]
+            },
+        }
+
+        items = self.instance._mteam_items(payload)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(self.instance._format_mteam_size(items[0]["size"]), "1 GiB")
+
+    def test_mteam_download_url_is_extracted_from_wrapped_payload(self):
+        self.assertEqual(
+            self.instance._mteam_download_url(
+                {"code": 0, "data": {"url": "https://dl.example/test.torrent"}}
+            ),
+            "https://dl.example/test.torrent",
+        )
+
+    def test_mteam_provider_alias_is_accepted(self):
+        self.assertEqual(
+            self.instance._parse_user_config_value("provider_type", "m-team"),
+            "mteam",
+        )
+
+    def test_mteam_sort_field_uses_official_enum(self):
+        self.assertEqual(plugin_module.MTEAM_SORT_FIELDS["completed"], "TIMES_COMPLETED")
+
+    def test_mteam_stats_are_read_from_nested_status_without_leaking_metadata(self):
+        item = {
+            "name": "真实标题",
+            "status": {
+                "seeders": 12,
+                "leechers": 3,
+                "timesCompleted": 8,
+                "toppingLevel": 1,
+                "status": "NORMAL",
+                "modifiedDate": "2026-08-28T00:00:00",
+            },
+        }
+        status = item["status"]
+
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "seeders"), "12"
+        )
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "leechers"), "3"
+        )
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "timesCompleted"), "8"
+        )
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "unknown"), "?"
+        )
+
+    def test_mteam_zero_stats_are_preserved(self):
+        status = {"seeders": 0, "leechers": 0, "timesCompleted": 0}
+        item = {}
+
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "seeders"), "0"
+        )
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "leechers"), "0"
+        )
+        self.assertEqual(
+            self.instance._mteam_display_value(status, item, "timesCompleted"), "0"
+        )
+
+
 class UserConfigTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = SavingConfig(

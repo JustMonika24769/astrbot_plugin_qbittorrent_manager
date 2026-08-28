@@ -18,6 +18,10 @@ _✨ 按 QQ 用户独立配置 PT 站，并推送到 qBittorrent / uTorrent 下�
 
 > 默认面向 NexusPHP 风格站点设计，其他同类 PT 站可通过配置搜索地址适配。
 
+### M-Team API
+
+当前仓库版本 `v1.7.0-beta.2` 为 M-Team API 测试版。将 `provider_type` 设置为 `mteam` 后，插件使用 M-Team API 搜索和下载，不再解析网页。默认使用 `https://api.m-team.cc`、`POST /api/torrent/search` 和 `POST /api/torrent/genDlToken`；配置 `mteam_api_token` 后即可使用。根据官方 Wiki，第三方调用必须将 Access Token 放在 `x-api-key` 请求头中；请勿使用 Cookie 代替 API Token。建议先将 `provider_base_url` 设置为 `https://test2.m-team.cc` 验证搜索和下载流程，再切换到生产站点。
+
 ## 🖼️ 效果预览
 
 ![搜索结果预览](assets/preview.jpeg)
@@ -54,9 +58,13 @@ git clone <本仓库地址>
 
 | 配置项 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `provider_base_url` | 否 | `https://www.tjupt.org/` | PT 站点根地址，默认北洋园 PT。 |
+| `provider_type` | 否 | `nexusphp` | PT 站点类型，可选 `nexusphp` 或 `mteam`。 |
+| `provider_base_url` | 否 | `https://www.tjupt.org/` | PT 站点根地址；M-Team 可填写 `https://api.m-team.cc`。 |
 | `provider_search_path` | 否 | `torrents.php?search={keyword}&incldead=0` | 搜索路径，必须包含 `{keyword}` 占位符。 |
 | `provider_cookie` | 是 | 空 | PT 站登录 Cookie，用于搜索和下载 `.torrent` 文件。 |
+| `mteam_api_token` | M-Team 必填 | 空 | M-Team API Token。建议仅在私聊或 AstrBot 面板中设置。 |
+| `mteam_search_path` | 否 | `/api/torrent/search` | M-Team API 搜索接口路径。 |
+| `mteam_download_path` | 否 | `/api/torrent/genDlToken` | M-Team 获取临时种子下载链接的接口路径。 |
 | `download_client` | 否 | `qbittorrent` | 下载客户端类型，可选 `qbittorrent` 或 `utorrent`。 |
 | `qb_url` | 选择 qBittorrent 时必填 | 空 | qBittorrent WebUI 地址，例如 `http://127.0.0.1:8080`。 |
 | `qb_username` | 否 | 空 | qBittorrent WebUI 用户名。 |
@@ -135,6 +143,14 @@ access_token=你的真实值; ip_notice_ignore=1
 /种子配置 设置 qb地址 http://127.0.0.1:8080
 /种子配置 设置 qb用户名 admin
 /种子配置 设置 qb密码 你的密码
+```
+
+M-Team 用户可设置：
+
+```text
+/种子配置 设置 站点类型 mteam
+/种子配置 设置 站点 https://api.m-team.cc
+/种子配置 设置 mteam令牌 你的 API Token
 ```
 
 uTorrent 用户可以设置：
