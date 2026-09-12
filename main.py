@@ -28,6 +28,17 @@ except ImportError:  # pragma: no cover - handled at runtime for friendly errors
     BeautifulSoup = None
 
 
+def _llm_tool(name: str):
+    """Register an AstrBot LLM tool while keeping unit-test stubs compatible."""
+    register_tool = getattr(filter, "llm_tool", None)
+    if register_tool is None:
+        return lambda handler: handler
+    try:
+        return register_tool(name=name)
+    except TypeError:
+        return register_tool(name)
+
+
 PLUGIN_DIR = Path(__file__).resolve().parent
 CARD_TEMPLATE = PLUGIN_DIR / "templates" / "torrent_results.html"
 DEFAULT_RENDER_WIDTH = 900
@@ -35,7 +46,7 @@ MAX_RENDER_HEIGHT = 5000
 RENDER_BASE_HEIGHT = 214
 RENDER_ITEM_HEIGHT = 108
 RENDER_STATUS_HEIGHT = 38
-PLUGIN_VERSION = "1.7.0-beta.2"
+PLUGIN_VERSION = "1.7.1"
 
 SORT_FIELD_ALIASES = {
     "time": "time",
@@ -377,6 +388,86 @@ class QBittorrentManagerPlugin(Star):
             yield event.plain_result(str(error))
             return
         yield event.plain_result(self._help_text())
+
+    @_llm_tool("search_torrents")
+    async def llm_search_torrents(
+        self,
+        event: AstrMessageEvent,
+        keyword: str,
+        sort_by: str = "",
+        descending: bool = True,
+    ) -> str:
+        """搜索 PT 种子。keyword 是搜索关键词；sort_by 可选时间、做种、下载、完成、大小或标题。"""
+        self._ensure_user_access(event)
+        keyword = str(keyword).strip()
+        if not keyword:
+            raise UserFacingError("搜索关键词不能为空。")
+        user_config = self._user_config(event)
+        normalized_sort = (
+            self._normalize_sort_field(sort_by) if str(sort_by).strip() else None
+        )
+        results = await self._search(keyword, user_config, normalized_sort, bool(descending))
+        if not results:
+            return f"没有找到与“{keyword}”相关的种子。"
+        self._remember_results(event, results, user_config)
+        return self._format_plain_results(keyword, results)
+
+    @_llm_tool("download_torrents")
+    async def llm_download_torrents(
+        self, event: AstrMessageEvent, indexes: str
+    ) -> str:
+        """把最近一次搜索结果中的指定序号添加到用户配置的下载客户端。序号可用空格或逗号分隔。"""
+        self._ensure_user_access(event)
+        results = self._get_cached_results(event)
+        if not results:
+            raise UserFacingError("没有可下载的搜索结果，请先搜索种子。")
+        user_config = self._user_config(event)
+        torrents = self._pick_results(str(indexes), results)
+        client_name = self._download_client_name(user_config)
+        succeeded: list[TorrentResult] = []
+        failed: list[tuple[TorrentResult, str]] = []
+        for torrent in torrents:
+            try:
+                await self._add_to_download_client(torrent, user_config)
+                succeeded.append(torrent)
+            except UserFacingError as error:
+                failed.append((torrent, str(error)))
+            except Exception as error:  # noqa: BLE001
+                logger.exception("LLM 添加下载任务失败：%s", torrent.title)
+                failed.append((torrent, f"添加下载失败：{error}"))
+        return self._format_batch_download_result(client_name, succeeded, failed)
+
+    @_llm_tool("direct_download")
+    async def llm_direct_download(self, event: AstrMessageEvent, uri: str) -> str:
+        """直接添加 magnet 磁链或 HTTP(S) .torrent 链接到下载客户端。"""
+        self._ensure_user_access(event)
+        uri = str(uri).strip()
+        if not self._is_supported_direct_uri(uri):
+            raise UserFacingError("只支持 magnet、http 或 https 链接。")
+        user_config = self._user_config(event)
+        direct_download = DirectDownload(uri=uri, title=self._direct_title(uri))
+        await self._add_direct_download(direct_download, user_config)
+        return f"已添加到 {self._download_client_name(user_config)}：{direct_download.title}"
+
+    @_llm_tool("show_torrent_config")
+    async def llm_show_torrent_config(self, event: AstrMessageEvent) -> str:
+        """查看当前用户生效的 PT 和下载客户端配置；敏感值只显示是否已设置。"""
+        self._ensure_user_access(event)
+        user_id = self._user_id(event)
+        return self._format_user_config(
+            user_id,
+            self._user_config(event),
+            self._user_overrides(user_id),
+            self._can_use_global_config(event),
+        )
+
+    @staticmethod
+    def _normalize_sort_field(value: str) -> str:
+        normalized = str(value).strip().lower()
+        sort_by = SORT_FIELD_ALIASES.get(normalized)
+        if not sort_by:
+            raise UserFacingError("不支持的排序字段，可选：时间、做种、下载、完成、大小、标题。")
+        return sort_by
 
     @filter.command_group("种子配置")
     def torrent_config(self):

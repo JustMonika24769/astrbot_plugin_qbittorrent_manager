@@ -20,7 +20,7 @@ _✨ 按 QQ 用户独立配置 PT 站，并推送到 qBittorrent / uTorrent 下�
 
 ### M-Team API
 
-当前仓库版本 `v1.7.0-beta.2` 为 M-Team API 测试版。将 `provider_type` 设置为 `mteam` 后，插件使用 M-Team API 搜索和下载，不再解析网页。默认使用 `https://api.m-team.cc`、`POST /api/torrent/search` 和 `POST /api/torrent/genDlToken`；配置 `mteam_api_token` 后即可使用。根据官方 Wiki，第三方调用必须将 Access Token 放在 `x-api-key` 请求头中；请勿使用 Cookie 代替 API Token。建议先将 `provider_base_url` 设置为 `https://test2.m-team.cc` 验证搜索和下载流程，再切换到生产站点。
+当前仓库版本为 `v1.7.1`。将 `provider_type` 设置为 `mteam` 后，插件使用 M-Team API 搜索和下载，不再解析网页。默认使用 `https://api.m-team.cc`、`POST /api/torrent/search` 和 `POST /api/torrent/genDlToken`；配置 `mteam_api_token` 后即可使用。根据官方 Wiki，第三方调用必须将 Access Token 放在 `x-api-key` 请求头中；请勿使用 Cookie 代替 API Token。建议先将 `provider_base_url` 设置为 `https://test2.m-team.cc` 验证搜索和下载流程，再切换到生产站点。
 
 ## 🖼️ 效果预览
 
@@ -124,6 +124,17 @@ access_token=你的真实值; ip_notice_ignore=1
 > `access_token` 等同登录凭证，请不要发到群聊、截图或公开仓库中。
 
 ## 🚀 使用方法
+
+### AI 自然语言工具
+
+插件会向 AstrBot 的 AI 提供以下工具。启用支持工具调用的模型后，用户可以直接用自然语言请求，例如“搜索漆黑的子弹”“把刚才第 1 和第 3 个添加下载”“添加这个磁链……”。AI 会根据需要调用工具，搜索结果仍按当前 QQ 用户缓存，下载前会复用白名单、个人配置和客户端校验。
+
+- `search_torrents`：搜索 PT 种子，可指定排序字段和顺序。
+- `download_torrents`：添加最近一次搜索结果中的序号，支持批量下载。
+- `direct_download`：添加 magnet 磁链或 HTTP(S) `.torrent` 链接。
+- `show_torrent_config`：查看当前生效配置，Cookie、Token 和密码只显示是否已设置。
+
+AI 工具与聊天命令使用同一套权限控制和用户配置；未配置 PT 站或下载客户端时，工具会返回明确的配置错误。涉及 Cookie、API Token、密码或公网下载链接时，建议在私聊中操作。
 
 ### 配置个人账号
 
